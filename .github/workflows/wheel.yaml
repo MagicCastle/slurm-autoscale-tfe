@@ -6,6 +6,7 @@ on:
       - "*"
 jobs:
   build_wheel:
+    runs-on: ubuntu-latest
     name: Build wheel
     steps:
       - uses: actions/checkout@v3
@@ -20,6 +21,7 @@ jobs:
         with:
           path: ./dist/*.whl
   create_release:
+    runs-on: ubuntu-latest
     name: Create release
     needs: [build_wheel]
     steps:
