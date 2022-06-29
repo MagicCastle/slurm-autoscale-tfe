@@ -1,9 +1,10 @@
-name: Build
+name: Build wheel and release
 
 on:
   push:
     tags:
       - "*"
+
 jobs:
   build_wheel:
     runs-on: ubuntu-latest

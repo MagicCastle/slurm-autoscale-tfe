@@ -6,7 +6,7 @@ via Terraform Cloud API.
 ## Install
 
 ```
-
+pip install git+https://github.com/MagicCastle/elastic-slurm-tf-cloud.git
 ```
 
 ## Develop
