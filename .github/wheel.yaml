@@ -1,0 +1,35 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - "*"
+jobs:
+  build_wheel:
+    name: Build wheel
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v3
+        with:
+          python-version: 3.x
+      - name: Install Poetry
+        run: python -m pip install poetry
+      - name: Build wheel
+        run: poetry build
+      - uses: actions/upload-artifact@v3
+        with:
+          path: ./dist/*.whl
+  create_release:
+    name: Create release
+    needs: [build_wheel]
+    steps:
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Elastic Slurm TC Cloud ${{ steps.tag_name.outputs.SOURCE_TAG }}
+          body_path: ${{ steps.tag_name.outputs.SOURCE_TAG }}-CHANGELOG.txt
+          draft: true
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
