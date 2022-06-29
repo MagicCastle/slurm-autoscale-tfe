@@ -70,7 +70,8 @@ def main():
     if len(sys.argv) == 3:
         command = Commands(sys.argv[1])
     elif len(sys.argv) == 2:
-        command = Commands(sys.argv[0].split("_", 1)[-1])
+        bin_name = os.path.basename(sys.argv[0])
+        command = Commands(bin_name.split("_", 1)[-1])
     else:
         print("Usage: slurm_elastic [resume,suspend] <hostlist>")
         sys.exit(1)
