@@ -1,4 +1,4 @@
-# elastic-slurm-tf-cloud
+# slurm-autoscale-tfe
 
 Python package to handle Slurm resume and suspend in a Magic Castle environment
 via Terraform Cloud API.
