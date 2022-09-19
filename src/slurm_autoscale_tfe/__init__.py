@@ -17,7 +17,7 @@ def resume(hostlist=argv[-1]):
     main(Commands.RESUME, set.update, hostlist)
 
 def suspend(hostlist=argv[-1]):
-    main(Commands.SUSPEND, set.intersection_update, hostlist)
+    main(Commands.SUSPEND, set.difference_update, hostlist)
 
 def main(command, op, hostlist):
     tfe_client = TFECLient(
