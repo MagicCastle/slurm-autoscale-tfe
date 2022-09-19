@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "elastic-slurm-tf-cloud"
-version = "0.1.0"
+name = "slurm-autoscale-tfe"
+version = "0.2.0"
 description = ""
 authors = ["Félix-Antoine Fortin <felix-antoine.fortin@calculquebec.ca>"]
 license = "MIT"
@@ -18,5 +18,5 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-slurm_suspend = "elastic_slurm_tf_cloud:main"
-slurm_resume = "elastic_slurm_tf_cloud:main"
+slurm_suspend = "slurm_autoscale_tfe:suspend"
+slurm_resume = "slurm_autoscale_tfe:resume"
