@@ -1,35 +1,34 @@
 #!/usr/bin/env python3
-import enum
-import os
-import sys
+from enum import Enum
+from os import environ
+from sys import argv
 
 from hostlist import expand_hostlist
 
 from .tfe import TFECLient
 
-POOL_VAR = os.environ.get("TFE_POOL_VAR", "pool")
+POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
 
-class Commands(enum.Enum):
+class Commands(Enum):
     RESUME = "resume"
     SUSPEND = "suspend"
 
-def resume(hostlist=sys.argv[-1]):
+def resume(hostlist=argv[-1]):
     main(Commands.RESUME, set.update, hostlist)
 
-def suspend(hostlist=sys.argv[-1]):
+def suspend(hostlist=argv[-1]):
     main(Commands.SUSPEND, set.intersection_update, hostlist)
 
 def main(command, op, hostlist):
     tfe_client = TFECLient(
-        token=os.environ["TFE_TOKEN"],
-        workspace=os.environ["TFE_WORKSPACE"],
+        token=environ["TFE_TOKEN"],
+        workspace=environ["TFE_WORKSPACE"],
     )
 
     hosts = expand_hostlist(hostlist)
     pool = tfe_client.fetch_variable(POOL_VAR)
     if pool is None:
-        print("\"{}\" variable not found in TFE workspace".format(POOL_VAR))
-        sys.exit(1)
+        raise Exception('"{}" variable not found in TFE workspace'.format(POOL_VAR))
 
     cur_pool = frozenset(pool["value"])
     new_pool = set(cur_pool)
@@ -43,7 +42,7 @@ def main(command, op, hostlist):
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == Commands.RESUME.value:
+    if argv[1] == Commands.RESUME.value:
         resume()
-    elif sys.argv[1] == Commands.SUSPEND.value:
+    elif argv[1] == Commands.SUSPEND.value:
         suspend()
