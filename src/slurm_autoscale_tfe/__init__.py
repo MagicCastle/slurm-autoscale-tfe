@@ -30,7 +30,12 @@ def main(command, op, hostlist):
     if pool is None:
         raise Exception('"{}" variable not found in TFE workspace'.format(POOL_VAR))
 
-    cur_pool = frozenset(pool["value"])
+    # When the pool variable was incorrectly initialized in the workspace,
+    # we avoid a catastrophe by setting the initial pool as an empty set.
+    if isinstance(pool["value"], list):
+        cur_pool = frozenset(pool["value"])
+    else:
+        cur_pool = frozenset()
     new_pool = set(cur_pool)
     op(new_pool, hosts)
 
