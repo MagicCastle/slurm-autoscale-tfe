@@ -16,13 +16,19 @@ class TFECLient:
         self.headers["Content-Type"] = API_CONTENT
         self.headers["Authorization"] = "Bearer {}".format(token)
 
+        # Validate init parameters by trying to retrieve workspace
+        url = "/".join((WORKSPACE_API, self.workspace))
+        resp = requests.get(url, headers=self.headers).json()
+        if "errors" in resp:
+            raise Exception("Invalid TFE API token or workspace ID")
+
     def fetch_variable(self, var_name):
         url = "/".join((WORKSPACE_API, self.workspace, "vars"))
         resp = requests.get(url, headers=self.headers)
         data = resp.json()["data"]
         for var in data:
             if var["attributes"]["key"] == var_name:
-                return { 
+                return {
                     "id": var["id"],
                     "value": json.loads(var["attributes"]["value"])
                 }

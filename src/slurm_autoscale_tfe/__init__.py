@@ -20,6 +20,11 @@ def suspend(hostlist=argv[-1]):
     main(Commands.SUSPEND, set.difference_update, hostlist)
 
 def main(command, op, hostlist):
+    if environ.get("TFE_TOKEN", "") == "":
+        raise Exception("{} requires environment variable TFE_TOKEN".format(argv[0]))
+    if environ.get("TFE_WORKSPACE", "") == "":
+        raise Exception("{} requires environment variable TFE_WORKSPACE".format(argv[0]))
+
     tfe_client = TFECLient(
         token=environ["TFE_TOKEN"],
         workspace=environ["TFE_WORKSPACE"],
