@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 
@@ -11,17 +12,18 @@ import (
 )
 
 func main() {
-	config := &tfe.Config{
-		Token: os.Getenv("TFE_TOKEN"),
+	tfe_workspace_id := os.Getenv("TFE_WORKSPACE_ID")
+	if tfe_workspace_id == "" {
+		log.Fatal("TFE_WORKSPACE_ID environment variable not set")
 	}
 
-	client, err := tfe.NewClient(config)
+	client, err := tfe.NewClient(tfe.DefaultConfig())
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	ctx := context.Background()
-	workspace, err := client.Workspaces.ReadByID(ctx, os.Getenv("TFE_WORKSPACE"))
+	workspace, err := client.Workspaces.ReadByID(ctx, tfe_workspace_id)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -31,17 +33,16 @@ func main() {
 	for _, s := range var_list.Items {
 		if s.Key == "pool" {
 			tfe_pool = s
+			break
 		}
 	}
-
-	variable, err := client.Variables.Read(ctx, workspace.ID, tfe_pool.ID)
-	if err != nil {
-		log.Fatal(err)
+	if tfe_pool == nil {
+		msg := fmt.Sprintf("%s variable not found in TFE workspace %s", "pool", workspace.Name)
+		log.Fatal(msg)
 	}
 
 	var pool []string
-	err = json.Unmarshal([]byte(variable.Value), &pool)
-	if err != nil {
+	if err = json.Unmarshal([]byte(tfe_pool.Value), &pool); err != nil {
 		log.Fatal(err)
 	}
 	var pool_set = make(map[string]bool)
@@ -69,6 +70,9 @@ func main() {
 	}
 
 	pool_json, err := json.Marshal(keys)
+	if err != nil {
+		log.Fatal(err)
+	}
 	value := string(pool_json)
 	tfe_pool2, err := client.Variables.Update(ctx, workspace.ID, tfe_pool.ID, tfe.VariableUpdateOptions{Value: &value})
 
