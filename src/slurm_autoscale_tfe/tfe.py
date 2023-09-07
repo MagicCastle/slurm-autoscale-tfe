@@ -7,13 +7,16 @@ WORKSPACE_API = "https://app.terraform.io/api/v2/workspaces"
 RUNS_API = "https://app.terraform.io/api/v2/runs"
 API_CONTENT = "application/vnd.api+json"
 
+
 class InvalidAPIToken(Exception):
     "Raised when the TFE API token is invalid"
     pass
 
+
 class InvalidWorkspaceId(Exception):
     "Raised when the TFE workspace ID is invalid"
     pass
+
 
 class TFECLient:
     def __init__(self, token, workspace):
@@ -28,9 +31,9 @@ class TFECLient:
         url = "/".join((WORKSPACE_API, self.workspace))
         resp = requests.get(url, headers=self.headers).json()
         if "errors" in resp:
-            if resp["errors"][0]["status"] == '401':
+            if resp["errors"][0]["status"] == "401":
                 raise InvalidAPIToken
-            elif resp["errors"][0]["status"] == '404':
+            elif resp["errors"][0]["status"] == "404":
                 raise InvalidWorkspaceId
 
     def fetch_variable(self, var_name):
@@ -41,10 +44,9 @@ class TFECLient:
             if var["attributes"]["key"] == var_name:
                 return {
                     "id": var["id"],
-                    "value": json.loads(var["attributes"]["value"])
+                    "value": json.loads(var["attributes"]["value"]),
                 }
         return None
-
 
     def update_variable(self, var_id, value):
         patch_data = {
@@ -59,7 +61,6 @@ class TFECLient:
         }
         url = "/".join((WORKSPACE_API, self.workspace, "vars", var_id))
         return requests.patch(url, headers=self.headers, json=patch_data)
-
 
     def apply(self, message):
         run_data = {
