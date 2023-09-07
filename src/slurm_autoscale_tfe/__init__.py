@@ -26,10 +26,22 @@ class Commands(Enum):
     SUSPEND = "suspend"
 
 def resume(hostlist=argv[-1]):
-    main(Commands.RESUME, frozenset.union, hostlist)
+    try:
+        main(Commands.RESUME, frozenset.union, hostlist)
+    except AutoscaleException as e:
+        logging.error(str(e))
+        return 1
+    else:
+        return 0
 
 def suspend(hostlist=argv[-1]):
-    main(Commands.SUSPEND, frozenset.difference, hostlist)
+    try:
+        main(Commands.SUSPEND, frozenset.difference, hostlist)
+    except AutoscaleException as e:
+        logging.error(str(e))
+        return 1
+    else:
+        return 0
 
 def main(command, op, hostlist):
     if environ.get("TFE_TOKEN", "") == "":
@@ -88,13 +100,7 @@ def main(command, op, hostlist):
 
 
 if __name__ == "__main__":
-    try:
-        if argv[1] == Commands.RESUME.value:
-            resume()
-        elif argv[1] == Commands.SUSPEND.value:
-            suspend()
-    except AutoscaleException as e:
-        logging.error(str(e))
-        exit(1)
-    else:
-        exit(0)
+    if argv[1] == Commands.RESUME.value:
+        exit(resume())
+    elif argv[1] == Commands.SUSPEND.value:
+        exit(suspend())
