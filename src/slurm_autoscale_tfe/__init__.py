@@ -4,7 +4,7 @@ import logging
 from enum import Enum
 from os import environ
 from sys import argv, exit
-from subprocess import run, CalledProcessError, PIPE
+from subprocess import run, PIPE
 
 from hostlist import expand_hostlist
 
