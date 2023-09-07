@@ -7,6 +7,14 @@ WORKSPACE_API = "https://app.terraform.io/api/v2/workspaces"
 RUNS_API = "https://app.terraform.io/api/v2/runs"
 API_CONTENT = "application/vnd.api+json"
 
+class InvalidAPIToken(Exception):
+    "Raised when the TFE API token is invalid"
+    pass
+
+class InvalidWorkspaceId(Exception):
+    "Raised when the TFE workspace ID is invalid"
+    pass
+
 class TFECLient:
     def __init__(self, token, workspace):
         self.token = token
@@ -20,7 +28,10 @@ class TFECLient:
         url = "/".join((WORKSPACE_API, self.workspace))
         resp = requests.get(url, headers=self.headers).json()
         if "errors" in resp:
-            raise Exception("Invalid TFE API token or workspace ID")
+            if resp["errors"][0]["status"] == '401':
+                raise InvalidAPIToken
+            elif resp["errors"][0]["status"] == '404':
+                raise InvalidWorkspaceId
 
     def fetch_variable(self, var_name):
         url = "/".join((WORKSPACE_API, self.workspace, "vars"))

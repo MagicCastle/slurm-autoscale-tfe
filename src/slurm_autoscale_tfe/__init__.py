@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
+import logging
+
 from enum import Enum
 from os import environ
-from sys import argv
+from sys import argv, exit
 from subprocess import getoutput
 
 from hostlist import expand_hostlist
 
-from .tfe import TFECLient
+from .tfe import TFECLient, InvalidAPIToken, InvalidWorkspaceId
+
+logging.basicConfig(
+    format='%(asctime)s %(levelname)s %(message)s',
+    level=logging.INFO,
+    datefmt='%Y-%m-%d %H:%M:%S')
 
 POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
+
+class AutoscaleException(Exception):
+    "Raised when something bad happened in autoscale main"
+    pass
 
 class Commands(Enum):
     RESUME = "resume"
@@ -22,19 +33,24 @@ def suspend(hostlist=argv[-1]):
 
 def main(command, op, hostlist):
     if environ.get("TFE_TOKEN", "") == "":
-        raise Exception("{} requires environment variable TFE_TOKEN".format(argv[0]))
+        raise AutoscaleException("{} requires environment variable TFE_TOKEN".format(argv[0]))
     if environ.get("TFE_WORKSPACE", "") == "":
-        raise Exception("{} requires environment variable TFE_WORKSPACE".format(argv[0]))
+        raise AutoscaleException("{} requires environment variable TFE_WORKSPACE".format(argv[0]))
 
-    tfe_client = TFECLient(
-        token=environ["TFE_TOKEN"],
-        workspace=environ["TFE_WORKSPACE"],
-    )
+    try:
+        tfe_client = TFECLient(
+            token=environ["TFE_TOKEN"],
+            workspace=environ["TFE_WORKSPACE"],
+        )
+    except InvalidAPIToken:
+        raise AutoscaleException("invalid TFE API token")
+    except InvalidWorkspaceId:
+        raise AutoscaleException("invalid TFE workspace id")
 
     hosts = expand_hostlist(hostlist)
     tfe_var = tfe_client.fetch_variable(POOL_VAR)
     if tfe_var is None:
-        raise Exception(f'"{POOL_VAR}" variable not found in TFE workspace')
+        raise AutoscaleException(f'"{POOL_VAR}" variable not found in TFE workspace "{environ["TFE_WORKSPACE"]}"')
 
     # When the pool variable was incorrectly initialized in the workspace,
     # we avoid a catastrophe by setting the initial pool as an empty set.
@@ -62,11 +78,17 @@ def main(command, op, hostlist):
         tfe_client.update_variable(tfe_var["id"], list(new_pool))
         tfe_client.apply(f"Slurm {command.value} {hostlist}")
     else:
-        print("No change")
+        logging.info(f"No change found while trying to {command} node {hostlist}")
 
 
 if __name__ == "__main__":
-    if argv[1] == Commands.RESUME.value:
-        resume()
-    elif argv[1] == Commands.SUSPEND.value:
-        suspend()
+    try:
+        if argv[1] == Commands.RESUME.value:
+            resume()
+        elif argv[1] == Commands.SUSPEND.value:
+            suspend()
+    except AutoscaleException as e:
+        logging.error(str(e))
+        exit(1)
+    else:
+        exit(0)
