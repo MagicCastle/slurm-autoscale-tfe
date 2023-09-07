@@ -96,7 +96,7 @@ def main(command, op, hostlist):
         tfe_client.update_variable(tfe_var["id"], list(new_pool))
         tfe_client.apply(f"Slurm {command.value} {hostlist}")
     else:
-        logging.info(f"No change found while trying to {command} node {hostlist}")
+        logging.info(f"No change found while trying to {command.value} node {hostlist}")
 
 
 if __name__ == "__main__":
