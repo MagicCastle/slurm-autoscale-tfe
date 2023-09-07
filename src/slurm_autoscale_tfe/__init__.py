@@ -7,6 +7,7 @@ import sys
 from enum import Enum
 from os import environ
 from subprocess import run, PIPE
+from requests.exceptions import Timeout
 
 from hostlist import expand_hostlist
 
@@ -78,9 +79,15 @@ def main(command, set_op, hostlist):
         raise AutoscaleException("invalid TFE API token") from exc
     except InvalidWorkspaceId as exc:
         raise AutoscaleException("invalid TFE workspace id") from exc
+    except Timeout as exc:
+        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
 
     hosts = expand_hostlist(hostlist)
-    tfe_var = tfe_client.fetch_variable(POOL_VAR)
+    try:
+        tfe_var = tfe_client.fetch_variable(POOL_VAR)
+    except Timeout as exc:
+        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+
     if tfe_var is None:
         raise AutoscaleException(
             f'"{POOL_VAR}" variable not found in TFE workspace "{environ["TFE_WORKSPACE"]}"'
@@ -126,13 +133,19 @@ def main(command, set_op, hostlist):
     new_pool = set_op(slurm_pool, hosts)
 
     if tfe_pool != new_pool:
-        tfe_client.update_variable(tfe_var["id"], list(new_pool))
+        try:
+            tfe_client.update_variable(tfe_var["id"], list(new_pool))
+        except Timeout as exc:
+            raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
     else:
         logging.info(
             'TFE pool was already correctly set when "%s %s" was issued', command.value, hostlist,
         )
 
-    tfe_client.apply(f"Slurm {command.value} {hostlist}")
+    try:
+        tfe_client.apply(f"Slurm {command.value} {hostlist}")
+    except Timeout as exc:
+        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
 
 
 if __name__ == "__main__":

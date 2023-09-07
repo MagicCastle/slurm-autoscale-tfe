@@ -21,21 +21,23 @@ class InvalidWorkspaceId(Exception):
 
 class TFECLient:
     """TFEClient provides functions to:
-        - retrieve a Terraform Cloud variable content
-        - update a Terraform cloud variable content
-        - queue a run
+    - retrieve a Terraform Cloud variable content
+    - update a Terraform cloud variable content
+    - queue a run
     """
-    def __init__(self, token, workspace):
+
+    def __init__(self, token, workspace, timeout=5):
         self.token = token
         self.workspace = workspace
         self.headers = CaseInsensitiveDict()
         self.headers["Accept"] = API_CONTENT
         self.headers["Content-Type"] = API_CONTENT
         self.headers["Authorization"] = f"Bearer {token}"
+        self.timeout = timeout
 
         # Validate init parameters by trying to retrieve workspace
         url = "/".join((WORKSPACE_API, self.workspace))
-        resp = requests.get(url, headers=self.headers).json()
+        resp = requests.get(url, headers=self.headers, timeout=self.timeout).json()
         if "errors" in resp:
             if resp["errors"][0]["status"] == "401":
                 raise InvalidAPIToken
@@ -43,10 +45,9 @@ class TFECLient:
                 raise InvalidWorkspaceId
 
     def fetch_variable(self, var_name):
-        """Get a workspace variable content
-        """
+        """Get a workspace variable content"""
         url = "/".join((WORKSPACE_API, self.workspace, "vars"))
-        resp = requests.get(url, headers=self.headers)
+        resp = requests.get(url, headers=self.headers, timeout=self.timeout)
         data = resp.json()["data"]
         for var in data:
             if var["attributes"]["key"] == var_name:
@@ -57,8 +58,7 @@ class TFECLient:
         return None
 
     def update_variable(self, var_id, value):
-        """Update a workspace variable content
-        """
+        """Update a workspace variable content"""
         patch_data = {
             "data": {
                 "id": var_id,
@@ -70,7 +70,9 @@ class TFECLient:
             }
         }
         url = "/".join((WORKSPACE_API, self.workspace, "vars", var_id))
-        return requests.patch(url, headers=self.headers, json=patch_data)
+        return requests.patch(
+            url, headers=self.headers, json=patch_data, timeout=self.timeout
+        )
 
     def apply(self, message):
         """Queue a workspace run"""
@@ -82,4 +84,6 @@ class TFECLient:
                 },
             }
         }
-        return requests.post(RUNS_API, headers=self.headers, json=run_data)
+        return requests.post(
+            RUNS_API, headers=self.headers, json=run_data, timeout=self.timeout
+        )
