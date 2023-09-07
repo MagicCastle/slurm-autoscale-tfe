@@ -79,11 +79,12 @@ def main(command, op, hostlist):
     # drift effect, we validate the state in Slurm of each node present in Terraform Cloud
     # pool variable. We only keep the nodes that are present in Slurm.
     try:
-        scontrol_run = run(['scontrol', 'show', '-o', 'node', ','.join(tfe_pool)], check=True, stdout=PIPE, stderr=PIPE)
-    except CalledProcessError:
-        raise AutoscaleException(f"scontrol show node returned the following error: {scontrol_run.stderr.decode()}")
+        scontrol_run = run(['scontrol', 'show', '-o', 'node', ','.join(tfe_pool)], stdout=PIPE, stderr=PIPE)
     except FileNotFoundError:
         raise AutoscaleException(f"Cannot find command scontrol")
+    if scontrol_run.stderr:
+        raise AutoscaleException(f"Error while calling scontrol {scontrol_run.stderr.decode()}")
+
     scontrol_lines = scontrol_run.stdout.decode().split('\n')
     slurm_pool = frozenset((
         node for node, line in zip(tfe_pool, scontrol_lines)
