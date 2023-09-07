@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 import logging
+import sys
 
 from enum import Enum
 from os import environ
-from sys import argv, exit
 from subprocess import run, PIPE
 
 from hostlist import expand_hostlist
@@ -20,8 +20,7 @@ POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
 
 
 class AutoscaleException(Exception):
-    "Raised when something bad happened in autoscale main"
-    pass
+    """Raised when something bad happened in autoscale main"""
 
 
 class Commands(Enum):
@@ -29,34 +28,32 @@ class Commands(Enum):
     SUSPEND = "suspend"
 
 
-def resume(hostlist=argv[-1]):
+def resume(hostlist=sys.argv[-1]):
     try:
         main(Commands.RESUME, frozenset.union, hostlist)
-    except AutoscaleException as e:
-        logging.error(str(e))
+    except AutoscaleException as exc:
+        logging.error(str(exc))
         return 1
-    else:
-        return 0
+    return 0
 
 
-def suspend(hostlist=argv[-1]):
+def suspend(hostlist=sys.argv[-1]):
     try:
         main(Commands.SUSPEND, frozenset.difference, hostlist)
-    except AutoscaleException as e:
-        logging.error(str(e))
+    except AutoscaleException as exc:
+        logging.error(str(exc))
         return 1
-    else:
-        return 0
+    return 0
 
 
-def main(command, op, hostlist):
+def main(command, set_op, hostlist):
     if environ.get("TFE_TOKEN", "") == "":
         raise AutoscaleException(
-            "{} requires environment variable TFE_TOKEN".format(argv[0])
+            f"{sys.argv[0]} requires environment variable TFE_TOKEN"
         )
     if environ.get("TFE_WORKSPACE", "") == "":
         raise AutoscaleException(
-            "{} requires environment variable TFE_WORKSPACE".format(argv[0])
+            f"{sys.argv[0]} requires environment variable TFE_WORKSPACE"
         )
 
     try:
@@ -64,10 +61,10 @@ def main(command, op, hostlist):
             token=environ["TFE_TOKEN"],
             workspace=environ["TFE_WORKSPACE"],
         )
-    except InvalidAPIToken:
-        raise AutoscaleException("invalid TFE API token")
-    except InvalidWorkspaceId:
-        raise AutoscaleException("invalid TFE workspace id")
+    except InvalidAPIToken as exc:
+        raise AutoscaleException("invalid TFE API token") from exc
+    except InvalidWorkspaceId as exc:
+        raise AutoscaleException("invalid TFE workspace id") from exc
 
     hosts = expand_hostlist(hostlist)
     tfe_var = tfe_client.fetch_variable(POOL_VAR)
@@ -95,9 +92,10 @@ def main(command, op, hostlist):
             ["scontrol", "show", "-o", "node", ",".join(tfe_pool)],
             stdout=PIPE,
             stderr=PIPE,
+            check=False,
         )
-    except FileNotFoundError:
-        raise AutoscaleException(f"Cannot find command scontrol")
+    except FileNotFoundError as exc:
+        raise AutoscaleException("Cannot find command scontrol") from exc
     if scontrol_run.stderr:
         raise AutoscaleException(
             f"Error while calling scontrol {scontrol_run.stderr.decode()}"
@@ -112,20 +110,20 @@ def main(command, op, hostlist):
         )
     )
 
-    new_pool = op(slurm_pool, hosts)
+    new_pool = set_op(slurm_pool, hosts)
 
     if tfe_pool != new_pool:
         tfe_client.update_variable(tfe_var["id"], list(new_pool))
     else:
         logging.info(
-            f'TFE pool was already correctly set when command "{command.value} {hostlist}" was issued'
+            'TFE pool was already correctly set when "%s %s" was issued', command.value, hostlist,
         )
 
     tfe_client.apply(f"Slurm {command.value} {hostlist}")
 
 
 if __name__ == "__main__":
-    if argv[1] == Commands.RESUME.value:
-        exit(resume())
-    elif argv[1] == Commands.SUSPEND.value:
-        exit(suspend())
+    if sys.argv[1] == Commands.RESUME.value:
+        sys.exit(resume())
+    elif sys.argv[1] == Commands.SUSPEND.value:
+        sys.exit(suspend())

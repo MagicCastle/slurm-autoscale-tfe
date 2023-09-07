@@ -9,13 +9,11 @@ API_CONTENT = "application/vnd.api+json"
 
 
 class InvalidAPIToken(Exception):
-    "Raised when the TFE API token is invalid"
-    pass
+    """Raised when the TFE API token is invalid"""
 
 
 class InvalidWorkspaceId(Exception):
-    "Raised when the TFE workspace ID is invalid"
-    pass
+    """Raised when the TFE workspace ID is invalid"""
 
 
 class TFECLient:
@@ -25,7 +23,7 @@ class TFECLient:
         self.headers = CaseInsensitiveDict()
         self.headers["Accept"] = API_CONTENT
         self.headers["Content-Type"] = API_CONTENT
-        self.headers["Authorization"] = "Bearer {}".format(token)
+        self.headers["Authorization"] = f"Bearer {token}"
 
         # Validate init parameters by trying to retrieve workspace
         url = "/".join((WORKSPACE_API, self.workspace))
@@ -33,7 +31,7 @@ class TFECLient:
         if "errors" in resp:
             if resp["errors"][0]["status"] == "401":
                 raise InvalidAPIToken
-            elif resp["errors"][0]["status"] == "404":
+            if resp["errors"][0]["status"] == "404":
                 raise InvalidWorkspaceId
 
     def fetch_variable(self, var_name):
