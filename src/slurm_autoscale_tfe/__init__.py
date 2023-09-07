@@ -81,10 +81,10 @@ def main(command, op, hostlist):
     try:
         scontrol_run = run(['scontrol', 'show', '-o', 'node', ','.join(tfe_pool)], check=True, stdout=PIPE, stderr=PIPE)
     except CalledProcessError:
-        raise AutoscaleException(f"scontrol show node returned the following error: {scontrol_run.stderr}")
+        raise AutoscaleException(f"scontrol show node returned the following error: {scontrol_run.stderr.decode()}")
     except FileNotFoundError:
         raise AutoscaleException(f"Cannot find command scontrol")
-    scontrol_lines = scontrol_run.stdout.split('\n')
+    scontrol_lines = scontrol_run.stdout.decode().split('\n')
     slurm_pool = frozenset((
         node for node, line in zip(tfe_pool, scontrol_lines)
         if line.startswith(f"NodeName={node}")
