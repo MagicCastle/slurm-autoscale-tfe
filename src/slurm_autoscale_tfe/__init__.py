@@ -26,10 +26,10 @@ class Commands(Enum):
     SUSPEND = "suspend"
 
 def resume(hostlist=argv[-1]):
-    main(Commands.RESUME, set.union, hostlist)
+    main(Commands.RESUME, frozenset.union, hostlist)
 
 def suspend(hostlist=argv[-1]):
-    main(Commands.SUSPEND, set.difference, hostlist)
+    main(Commands.SUSPEND, frozenset.difference, hostlist)
 
 def main(command, op, hostlist):
     if environ.get("TFE_TOKEN", "") == "":
