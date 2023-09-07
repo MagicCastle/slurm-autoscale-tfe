@@ -4,7 +4,7 @@ import logging
 from enum import Enum
 from os import environ
 from sys import argv, exit
-from subprocess import run, CalledProcessError
+from subprocess import run, CalledProcessError, PIPE
 
 from hostlist import expand_hostlist
 
@@ -67,7 +67,7 @@ def main(command, op, hostlist):
     # drift effect, we validate the state in Slurm of each node present in Terraform Cloud
     # pool variable. We only keep the nodes that are present in Slurm.
     try:
-        scontrol_run = run(['scontrol', 'show', '-o', 'node', ','.join(tfe_pool)], check=True, capture_output=True)
+        scontrol_run = run(['scontrol', 'show', '-o', 'node', ','.join(tfe_pool)], check=True, stdout=PIPE, stderr=PIPE)
     except CalledProcessError:
         raise AutoscaleException(f"Error calling scontrol show node: {scontrol_run.stderr}")
     scontrol_lines = scontrol_run.stdout.split('\n')
