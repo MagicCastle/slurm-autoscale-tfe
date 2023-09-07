@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Main module providing Slurm autoscaling functions with Terraform Cloud
+"""
 import logging
 import sys
 
@@ -24,11 +26,15 @@ class AutoscaleException(Exception):
 
 
 class Commands(Enum):
+    """Enumerate the name of script's commands"""
     RESUME = "resume"
     SUSPEND = "suspend"
 
 
 def resume(hostlist=sys.argv[-1]):
+    """Issue a request to Terraform cloud to power up the instances listed in
+    hostlist.
+    """
     try:
         main(Commands.RESUME, frozenset.union, hostlist)
     except AutoscaleException as exc:
@@ -38,6 +44,9 @@ def resume(hostlist=sys.argv[-1]):
 
 
 def suspend(hostlist=sys.argv[-1]):
+    """Issue a request to Terraform cloud to power down the instances listed in
+    hostlist.
+    """
     try:
         main(Commands.SUSPEND, frozenset.difference, hostlist)
     except AutoscaleException as exc:
@@ -47,6 +56,10 @@ def suspend(hostlist=sys.argv[-1]):
 
 
 def main(command, set_op, hostlist):
+    """Issue a request to Terraform cloud to modify the pool variable of the
+    workspace indicated by TFE_WORKSPACE environment variable using the operation
+    provided as set_op and the hostnames provided in hostlist.
+    """
     if environ.get("TFE_TOKEN", "") == "":
         raise AutoscaleException(
             f"{sys.argv[0]} requires environment variable TFE_TOKEN"

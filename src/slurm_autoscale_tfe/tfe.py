@@ -1,3 +1,6 @@
+"""Module providing the class to interact with Terraform Cloud API
+"""
+
 import json
 
 import requests
@@ -17,6 +20,11 @@ class InvalidWorkspaceId(Exception):
 
 
 class TFECLient:
+    """TFEClient provides functions to:
+        - retrieve a Terraform Cloud variable content
+        - update a Terraform cloud variable content
+        - queue a run
+    """
     def __init__(self, token, workspace):
         self.token = token
         self.workspace = workspace
@@ -35,6 +43,8 @@ class TFECLient:
                 raise InvalidWorkspaceId
 
     def fetch_variable(self, var_name):
+        """Get a workspace variable content
+        """
         url = "/".join((WORKSPACE_API, self.workspace, "vars"))
         resp = requests.get(url, headers=self.headers)
         data = resp.json()["data"]
@@ -47,6 +57,8 @@ class TFECLient:
         return None
 
     def update_variable(self, var_id, value):
+        """Update a workspace variable content
+        """
         patch_data = {
             "data": {
                 "id": var_id,
@@ -61,6 +73,7 @@ class TFECLient:
         return requests.patch(url, headers=self.headers, json=patch_data)
 
     def apply(self, message):
+        """Queue a workspace run"""
         run_data = {
             "data": {
                 "attributes": {"message": message},
