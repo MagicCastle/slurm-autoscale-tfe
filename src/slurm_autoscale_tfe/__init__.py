@@ -32,6 +32,19 @@ class Commands(Enum):
     SUSPEND = "suspend"
 
 
+def change_host_state(hostlist, state):
+    """Change the state of the hostlist in Slurm with scontrol.
+    Called when an exception occured and we have to revert course with
+    the state set by Slurm after calling resumeprogram or suspendprogram.
+    """
+    run(
+        ["scontrol", "update", f"NodeName={hostlist}", f"state={state}"],
+        stdout=PIPE,
+        stderr=PIPE,
+        check=True,
+    )
+
+
 def resume(hostlist=sys.argv[-1]):
     """Issue a request to Terraform cloud to power up the instances listed in
     hostlist.
@@ -40,6 +53,7 @@ def resume(hostlist=sys.argv[-1]):
         main(Commands.RESUME, frozenset.union, hostlist)
     except AutoscaleException as exc:
         logging.error(str(exc))
+        change_host_state(hostlist, "DOWN")
         return 1
     return 0
 
@@ -52,6 +66,7 @@ def suspend(hostlist=sys.argv[-1]):
         main(Commands.SUSPEND, frozenset.difference, hostlist)
     except AutoscaleException as exc:
         logging.error(str(exc))
+        change_host_state(hostlist, "RESUME")
         return 1
     return 0
 
