@@ -41,7 +41,7 @@ def change_host_state(hostlist, state):
         ["scontrol", "update", f"NodeName={hostlist}", f"state={state}"],
         stdout=PIPE,
         stderr=PIPE,
-        check=True,
+        check=False,
     )
 
 
