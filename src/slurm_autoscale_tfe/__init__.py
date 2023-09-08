@@ -53,7 +53,7 @@ def resume(hostlist=sys.argv[-1]):
     try:
         main(Commands.RESUME, frozenset.union, hostlist)
     except AutoscaleException as exc:
-        logging.error("Fail to resume '%s': %s", hostlist, str(exc))
+        logging.error("Failed to resume '%s': %s", hostlist, str(exc))
         change_host_state(hostlist, "DOWN", reason=str(exc))
         return 1
     return 0
@@ -66,7 +66,7 @@ def suspend(hostlist=sys.argv[-1]):
     try:
         main(Commands.SUSPEND, frozenset.difference, hostlist)
     except AutoscaleException as exc:
-        logging.error("Fail to suspend '%s': %s", hostlist, str(exc))
+        logging.error("Failed to suspend '%s': %s", hostlist, str(exc))
         change_host_state(hostlist, "DOWN", reason=str(exc))
         return 1
     return 0
