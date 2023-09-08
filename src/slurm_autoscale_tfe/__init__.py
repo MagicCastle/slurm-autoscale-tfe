@@ -32,13 +32,14 @@ class Commands(Enum):
     SUSPEND = "suspend"
 
 
-def change_host_state(hostlist, state):
+def change_host_state(hostlist, state, reason=None):
     """Change the state of the hostlist in Slurm with scontrol.
     Called when an exception occured and we have to revert course with
     the state set by Slurm after calling resumeprogram or suspendprogram.
     """
+    reason = [f"reason={reason}"] if reason is not None else []
     run(
-        ["scontrol", "update", f"NodeName={hostlist}", f"state={state}"],
+        ["scontrol", "update", f"NodeName={hostlist}", f"state={state}"] + reason,
         stdout=PIPE,
         stderr=PIPE,
         check=False,
@@ -53,7 +54,7 @@ def resume(hostlist=sys.argv[-1]):
         main(Commands.RESUME, frozenset.union, hostlist)
     except AutoscaleException as exc:
         logging.error(str(exc))
-        change_host_state(hostlist, "DOWN")
+        change_host_state(hostlist, "DOWN", reason=str(exc))
         return 1
     return 0
 
