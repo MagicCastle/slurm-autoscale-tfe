@@ -146,6 +146,12 @@ def main(command, set_op, hostlist):
         )
     )
 
+    zombie_nodes = tfe_pool - slurm_pool
+    if len(zombie_nodes) > 0:
+        logging.warning(
+            'TFE vs Slurm drift detected, these nodes will be terminated: %s', ",".join(sorted(zombie_nodes))
+        )
+
     new_pool = set_op(slurm_pool, hosts)
 
     if tfe_pool != new_pool:
@@ -154,7 +160,7 @@ def main(command, set_op, hostlist):
         except Timeout as exc:
             raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
     else:
-        logging.info(
+        logging.warning(
             'TFE pool was already correctly set when "%s %s" was issued', command.value, hostlist,
         )
 
@@ -162,6 +168,7 @@ def main(command, set_op, hostlist):
         tfe_client.apply(f"Slurm {command.value} {hostlist}")
     except Timeout as exc:
         raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+    logging.info("%s %s", command.value, hostlist)
 
 
 if __name__ == "__main__":
