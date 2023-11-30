@@ -142,9 +142,9 @@ def main(command, set_op, hostlist):
     scontrol_lines = scontrol_run.stdout.decode().split("\n")
     slurm_pool = []
     for line in scontrol_lines:
-        m = node_state_regex.match(line)
-        if m and not m.group(2).endswith('DOWN'):
-            slurm_pool.append(m.group(1))
+        match = node_state_regex.match(line)
+        if match and not match.group(2).endswith('DOWN'):
+            slurm_pool.append(match.group(1))
     slurm_pool = frozenset(slurm_pool)
 
     zombie_nodes = tfe_pool - slurm_pool
