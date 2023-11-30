@@ -150,7 +150,8 @@ def main(command, set_op, hostlist):
     zombie_nodes = tfe_pool - slurm_pool
     if len(zombie_nodes) > 0:
         logging.warning(
-            'TFE vs Slurm drift detected, these nodes will be terminated: %s', ",".join(sorted(zombie_nodes))
+            'TFE vs Slurm drift detected, these nodes will be terminated: %s',
+            ",".join(sorted(zombie_nodes))
         )
 
     new_pool = set_op(slurm_pool, hosts)
