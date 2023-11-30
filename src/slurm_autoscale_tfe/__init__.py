@@ -2,6 +2,7 @@
 """Main module providing Slurm autoscaling functions with Terraform Cloud
 """
 import logging
+import re
 import sys
 
 from enum import Enum
@@ -21,6 +22,7 @@ logging.basicConfig(
 
 POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
 
+node_state_regex = re.compile(r'^NodeName=([a-z0-9-]*).*State=([A-Z_+]*).*$')
 
 class AutoscaleException(Exception):
     """Raised when something bad happened in autoscale main"""
@@ -138,13 +140,12 @@ def main(command, set_op, hostlist):
         )
 
     scontrol_lines = scontrol_run.stdout.decode().split("\n")
-    slurm_pool = frozenset(
-        (
-            node
-            for node, line in zip(tfe_pool, scontrol_lines)
-            if line.startswith(f"NodeName={node}")
-        )
-    )
+    slurm_pool = []
+    for line in scontrol_lines:
+        m = node_state_regex.match(line)
+        if m and not m.group(2).endswith('DOWN'):
+            slurm_pool.append(m.group(1))
+    slurm_pool = frozenset(slurm_pool)
 
     zombie_nodes = tfe_pool - slurm_pool
     if len(zombie_nodes) > 0:
