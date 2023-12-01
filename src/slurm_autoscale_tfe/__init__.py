@@ -129,7 +129,7 @@ def main(command, set_op, hostlist):
     except Timeout as exc:
         raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
 
-    hosts = expand_hostlist(hostlist)
+    hosts = frozenset(expand_hostlist(hostlist))
     try:
         tfe_var = tfe_client.fetch_variable(POOL_VAR)
     except Timeout as exc:
@@ -155,7 +155,7 @@ def main(command, set_op, hostlist):
     # drift effect, we validate the state in Slurm of each node present in Terraform Cloud
     # pool variable. We only keep the nodes that are present in Slurm.
     slurm_pool = identify_online_nodes(tfe_pool)
-    zombie_nodes = tfe_pool - slurm_pool
+    zombie_nodes = tfe_pool - slurm_pool - hosts
     extra_command = ""
     if len(zombie_nodes) > 0:
         zombie_nodes_string = ",".join(sorted(zombie_nodes))
