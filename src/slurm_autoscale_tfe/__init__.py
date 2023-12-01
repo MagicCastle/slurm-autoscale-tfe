@@ -160,7 +160,7 @@ def main(command, set_op, hostlist):
     if len(zombie_nodes) > 0:
         zombie_nodes_string = ",".join(sorted(zombie_nodes))
         logging.warning(
-            'TFE vs Slurm drift detected, these nodes will be terminated: %s',
+            'TFE vs Slurm drift detected, these nodes will be suspended: %s',
             zombie_nodes_string
         )
         extra_command = f" & suspend {zombie_nodes_string} (drift detection)"
