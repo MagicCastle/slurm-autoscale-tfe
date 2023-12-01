@@ -22,8 +22,9 @@ logging.basicConfig(
 
 POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
 
-NODE_STATE_REGEX = re.compile(r'^NodeName=([a-z0-9-]*).*State=([A-Z_+]*).*$')
-DOWN_FLAG_SET = frozenset(['DOWN', 'POWER_DOWN', 'POWERED_DOWN', 'POWERING_DOWN'])
+NODE_STATE_REGEX = re.compile(r"^NodeName=([a-z0-9-]*).*State=([A-Z_+]*).*$")
+DOWN_FLAG_SET = frozenset(["DOWN", "POWER_DOWN", "POWERED_DOWN", "POWERING_DOWN"])
+
 
 class AutoscaleException(Exception):
     """Raised when something bad happened in autoscale main"""
@@ -31,6 +32,7 @@ class AutoscaleException(Exception):
 
 class Commands(Enum):
     """Enumerate the name of script's commands"""
+
     RESUME = "resume"
     SUSPEND = "suspend"
 
@@ -75,9 +77,53 @@ def suspend(hostlist=sys.argv[-1]):
     return 0
 
 
-def identify_online_nodes(tfe_pool):
-    """Identify from a list of hosts which ones are online based on Slurm.
+def connect_tfe_client():
+    """Return a TFE client object using environment variables for authentication
     """
+    if environ.get("TFE_TOKEN", "") == "":
+        raise AutoscaleException(
+            f"{sys.argv[0]} requires environment variable TFE_TOKEN"
+        )
+    if environ.get("TFE_WORKSPACE", "") == "":
+        raise AutoscaleException(
+            f"{sys.argv[0]} requires environment variable TFE_WORKSPACE"
+        )
+
+    try:
+        return TFECLient(
+            token=environ["TFE_TOKEN"],
+            workspace=environ["TFE_WORKSPACE"],
+        )
+    except InvalidAPIToken as exc:
+        raise AutoscaleException("invalid TFE API token") from exc
+    except InvalidWorkspaceId as exc:
+        raise AutoscaleException("invalid TFE workspace id") from exc
+    except Timeout as exc:
+        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+
+
+def get_pool_from_tfe(tfe_client):
+    """Retrieve id and content of POOL variable from Terraform cloud
+    """
+    try:
+        tfe_var = tfe_client.fetch_variable(POOL_VAR)
+    except Timeout as exc:
+        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+
+    if tfe_var is None:
+        raise AutoscaleException(
+            f'"{POOL_VAR}" variable not found in TFE workspace "{environ["TFE_WORKSPACE"]}"'
+        )
+
+    # When the pool variable was incorrectly initialized in the workspace,
+    # we avoid a catastrophe by setting the initial pool as an empty set.
+    if isinstance(tfe_var["value"], list):
+        return tfe_var["id"], frozenset(tfe_var["value"])
+    return tfe_var["id"], frozenset()
+
+
+def identify_online_nodes(tfe_pool):
+    """Identify from a list of hosts which ones are online based on Slurm."""
     try:
         scontrol_run = run(
             ["scontrol", "show", "-o", "node", ",".join(tfe_pool)],
@@ -92,60 +138,25 @@ def identify_online_nodes(tfe_pool):
             f"Error while calling scontrol {scontrol_run.stderr.decode()}"
         )
 
-    scontrol_lines = scontrol_run.stdout.decode().split("\n")
     slurm_pool = []
-    for line in scontrol_lines:
+    for line in scontrol_run.stdout.decode().split("\n"):
         match = NODE_STATE_REGEX.match(line)
         if match:
-            node_state = frozenset(match.group(2).split('+'))
+            node_state = frozenset(match.group(2).split("+"))
             if not node_state.intersection(DOWN_FLAG_SET):
                 slurm_pool.append(match.group(1))
 
     return frozenset(slurm_pool)
+
 
 def main(command, set_op, hostlist):
     """Issue a request to Terraform cloud to modify the pool variable of the
     workspace indicated by TFE_WORKSPACE environment variable using the operation
     provided as set_op and the hostnames provided in hostlist.
     """
-    if environ.get("TFE_TOKEN", "") == "":
-        raise AutoscaleException(
-            f"{sys.argv[0]} requires environment variable TFE_TOKEN"
-        )
-    if environ.get("TFE_WORKSPACE", "") == "":
-        raise AutoscaleException(
-            f"{sys.argv[0]} requires environment variable TFE_WORKSPACE"
-        )
-
-    try:
-        tfe_client = TFECLient(
-            token=environ["TFE_TOKEN"],
-            workspace=environ["TFE_WORKSPACE"],
-        )
-    except InvalidAPIToken as exc:
-        raise AutoscaleException("invalid TFE API token") from exc
-    except InvalidWorkspaceId as exc:
-        raise AutoscaleException("invalid TFE workspace id") from exc
-    except Timeout as exc:
-        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
-
     hosts = frozenset(expand_hostlist(hostlist))
-    try:
-        tfe_var = tfe_client.fetch_variable(POOL_VAR)
-    except Timeout as exc:
-        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
-
-    if tfe_var is None:
-        raise AutoscaleException(
-            f'"{POOL_VAR}" variable not found in TFE workspace "{environ["TFE_WORKSPACE"]}"'
-        )
-
-    # When the pool variable was incorrectly initialized in the workspace,
-    # we avoid a catastrophe by setting the initial pool as an empty set.
-    if isinstance(tfe_var["value"], list):
-        tfe_pool = frozenset(tfe_var["value"])
-    else:
-        tfe_pool = frozenset()
+    tfe_client = connect_tfe_client()
+    var_id, tfe_pool = get_pool_from_tfe(tfe_client)
 
     # Verify that TFE pool corresponds to Slurm pool:
     # When a powered up node fail to respond after slurm.conf's ResumeTimeout
@@ -160,8 +171,8 @@ def main(command, set_op, hostlist):
     if len(zombie_nodes) > 0:
         zombie_nodes_string = ",".join(sorted(zombie_nodes))
         logging.warning(
-            'TFE vs Slurm drift detected, these nodes will be suspended: %s',
-            zombie_nodes_string
+            "TFE vs Slurm drift detected, these nodes will be suspended: %s",
+            zombie_nodes_string,
         )
         extra_command = f" & suspend {zombie_nodes_string} (drift detection)"
 
@@ -169,12 +180,16 @@ def main(command, set_op, hostlist):
 
     if tfe_pool != new_pool:
         try:
-            tfe_client.update_variable(tfe_var["id"], list(new_pool))
+            tfe_client.update_variable(var_id, list(new_pool))
         except Timeout as exc:
-            raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+            raise AutoscaleException(
+                "Connection to Terraform cloud timeout (5s)"
+            ) from exc
     else:
         logging.warning(
-            'TFE pool was already correctly set when "%s %s" was issued', command.value, hostlist,
+            'TFE pool was already correctly set when "%s %s" was issued',
+            command.value,
+            hostlist,
         )
 
     try:
