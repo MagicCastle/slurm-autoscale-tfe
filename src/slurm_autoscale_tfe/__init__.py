@@ -163,7 +163,7 @@ def main(command, set_op, hostlist):
             'TFE vs Slurm drift detected, these nodes will be terminated: %s',
             zombie_nodes_string
         )
-        extra_command = f" & drift suspend {zombie_nodes_string}"
+        extra_command = f" & suspend {zombie_nodes_string} (drift detection)"
 
     new_pool = set_op(slurm_pool, hosts)
 
