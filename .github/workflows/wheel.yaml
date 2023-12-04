@@ -19,6 +19,7 @@ jobs:
       - name: Build wheel
         run: poetry build
       - uses: actions/upload-artifact@v3
+        name: python-package-distributions
         with:
           path: ./dist/*.whl
   create_release:
@@ -26,11 +27,15 @@ jobs:
     name: Create release
     needs: [build_wheel]
     steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@v3
+        with:
+          name: python-package-distributions
+          path: dist/
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          name: Elastic Slurm TC Cloud ${{ steps.tag_name.outputs.SOURCE_TAG }}
-          body_path: ${{ steps.tag_name.outputs.SOURCE_TAG }}-CHANGELOG.txt
+          name: Slurm Autoscale TFE
           draft: true
           files: |
             dist/*
