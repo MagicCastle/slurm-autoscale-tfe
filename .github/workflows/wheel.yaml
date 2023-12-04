@@ -19,8 +19,8 @@ jobs:
       - name: Build wheel
         run: poetry build
       - uses: actions/upload-artifact@v3
-        name: python-package-distributions
         with:
+          name: python-package-distributions
           path: ./dist/*.whl
   create_release:
     runs-on: ubuntu-latest
