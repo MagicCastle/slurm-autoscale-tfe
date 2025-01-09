@@ -10,6 +10,7 @@ from os import environ
 from subprocess import run, PIPE
 from requests.exceptions import Timeout
 
+from filelock import FileLock
 from hostlist import expand_hostlist
 
 from .tfe import TFECLient, InvalidAPIToken, InvalidWorkspaceId
@@ -24,6 +25,14 @@ POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
 
 NODE_STATE_REGEX = re.compile(r"^NodeName=([a-z0-9-]*).*State=([A-Z_+]*).*$")
 DOWN_FLAG_SET = frozenset(["DOWN", "POWER_DOWN", "POWERED_DOWN", "POWERING_DOWN"])
+INSTANCE_TYPES = frozenset(
+    [
+        "aws_instance",
+        "azurerm_linux_virtual_machine",
+        "google_compute_instance",
+        "openstack_compute_instance_v2",
+    ]
+)
 
 
 class AutoscaleException(Exception):
@@ -34,6 +43,7 @@ class Commands(Enum):
     """Enumerate the name of script's commands"""
 
     RESUME = "resume"
+    RESUME_FAIL = "resume_fail"
     SUSPEND = "suspend"
 
 
@@ -43,12 +53,19 @@ def change_host_state(hostlist, state, reason=None):
     the state set by Slurm after calling resumeprogram or suspendprogram.
     """
     reason = [f"reason={reason}"] if reason is not None else []
-    run(
-        ["scontrol", "update", f"NodeName={hostlist}", f"state={state}"] + reason,
-        stdout=PIPE,
-        stderr=PIPE,
-        check=False,
-    )
+    try:
+        scontrol_run = run(
+            ["scontrol", "update", f"NodeName={hostlist}", f"state={state}"] + reason,
+            stdout=PIPE,
+            stderr=PIPE,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise AutoscaleException("Cannot find command scontrol") from exc
+    if scontrol_run.stderr:
+        raise AutoscaleException(
+            f"Error while calling scontrol update: {scontrol_run.stderr.decode()}"
+        )
 
 
 def resume(hostlist=sys.argv[-1]):
@@ -77,14 +94,26 @@ def suspend(hostlist=sys.argv[-1]):
     return 0
 
 
-def connect_tfe_client():
-    """Return a TFE client object using environment variables for authentication
+def resume_fail(hostlist=sys.argv[-1]):
+    """Issue a request to Terraform cloud to power down the instances listed in
+    hostlist.
     """
-    if environ.get("TFE_TOKEN", "") == "":
+    try:
+        main(Commands.RESUME_FAIL, frozenset.difference, hostlist)
+    except AutoscaleException as exc:
+        logging.error("Failed to resume_fail '%s': %s", hostlist, str(exc))
+        change_host_state(hostlist, "DOWN", reason=str(exc))
+        return 1
+    return 0
+
+
+def connect_tfe_client():
+    """Return a TFE client object using environment variables for authentication"""
+    if "TFE_TOKEN" not in environ:
         raise AutoscaleException(
             f"{sys.argv[0]} requires environment variable TFE_TOKEN"
         )
-    if environ.get("TFE_WORKSPACE", "") == "":
+    if "TFE_WORKSPACE" not in environ:
         raise AutoscaleException(
             f"{sys.argv[0]} requires environment variable TFE_WORKSPACE"
         )
@@ -103,8 +132,7 @@ def connect_tfe_client():
 
 
 def get_pool_from_tfe(tfe_client):
-    """Retrieve id and content of POOL variable from Terraform cloud
-    """
+    """Retrieve id and content of POOL variable from Terraform cloud"""
     try:
         tfe_var = tfe_client.fetch_variable(POOL_VAR)
     except Timeout as exc:
@@ -122,31 +150,19 @@ def get_pool_from_tfe(tfe_client):
     return tfe_var["id"], frozenset()
 
 
-def identify_online_nodes(tfe_pool):
-    """Identify from a list of hosts which ones are online based on Slurm."""
+def get_instances_from_tfe(tfe_client):
+    """Return all names of instances that are created in Terraform Cloud state."""
     try:
-        scontrol_run = run(
-            ["scontrol", "show", "-o", "node", ",".join(tfe_pool)],
-            stdout=PIPE,
-            stderr=PIPE,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise AutoscaleException("Cannot find command scontrol") from exc
-    if scontrol_run.stderr:
-        raise AutoscaleException(
-            f"Error while calling scontrol {scontrol_run.stderr.decode()}"
-        )
-
-    slurm_pool = []
-    for line in scontrol_run.stdout.decode().split("\n"):
-        match = NODE_STATE_REGEX.match(line)
-        if match:
-            node_state = frozenset(match.group(2).split("+"))
-            if not node_state.intersection(DOWN_FLAG_SET):
-                slurm_pool.append(match.group(1))
-
-    return frozenset(slurm_pool)
+        tfe_resources = tfe_client.fetch_resources()
+    except Timeout as exc:
+        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+    instances = []
+    address_prefix = None
+    for resource in tfe_resources:
+        if resource["attributes"]["provider-type"] in INSTANCE_TYPES:
+            instances.append(resource["attributes"]["name-index"])
+            address_prefix = resource["attributes"]["address"].split("[")[0]
+    return frozenset(instances), address_prefix
 
 
 def main(command, set_op, hostlist):
@@ -156,51 +172,33 @@ def main(command, set_op, hostlist):
     """
     hosts = frozenset(expand_hostlist(hostlist))
     tfe_client = connect_tfe_client()
-    var_id, tfe_pool = get_pool_from_tfe(tfe_client)
 
-    # Verify that TFE pool corresponds to Slurm pool:
-    # When a powered up node fail to respond after slurm.conf's ResumeTimeout
-    # slurmctld marks the node as "DOWN", but it will not call the SuspendProgram
-    # on the node. Therefore, a change drift can happen between Slurm internal memory
-    # of what nodes are online and the Terraform Cloud pool variable. To limit the
-    # drift effect, we validate the state in Slurm of each node present in Terraform Cloud
-    # pool variable. We only keep the nodes that are present in Slurm.
-    slurm_pool = identify_online_nodes(tfe_pool)
-    zombie_nodes = tfe_pool - slurm_pool - hosts
-    extra_command = ""
-    if len(zombie_nodes) > 0:
-        zombie_nodes_string = ",".join(sorted(zombie_nodes))
-        logging.warning(
-            "TFE vs Slurm drift detected, these nodes will be suspended: %s",
-            zombie_nodes_string,
-        )
-        extra_command = f" & suspend {zombie_nodes_string} (drift detection)"
+    with FileLock("/tmp/slurm_autoscale_tfe_pool.lock"):
+        var_id, tfe_pool = get_pool_from_tfe(tfe_client)
+        next_pool = set_op(tfe_pool, hosts)
+        if tfe_pool != next_pool:
+            try:
+                tfe_client.update_variable(var_id, list(next_pool))
+            except Timeout as exc:
+                raise AutoscaleException(
+                    "Connection to Terraform cloud timeout (5s)"
+                ) from exc
+        else:
+            logging.warning(
+                'TFE pool variable is unchanged following the issue of "%s %s"',
+                command.value,
+                hostlist,
+            )
 
-    new_pool = set_op(slurm_pool, hosts)
-
-    if tfe_pool != new_pool:
-        try:
-            tfe_client.update_variable(var_id, list(new_pool))
-        except Timeout as exc:
-            raise AutoscaleException(
-                "Connection to Terraform cloud timeout (5s)"
-            ) from exc
-    else:
-        logging.warning(
-            'TFE pool was already correctly set when "%s %s" was issued',
-            command.value,
-            hostlist,
-        )
-
+    _, address_prefix = get_instances_from_tfe(tfe_client)
     try:
-        tfe_client.apply(f"Slurm {command.value} {hostlist} {extra_command}".strip())
+        run_id = tfe_client.apply(
+            f"Slurm {command.value} {hostlist}".strip(),
+            targets=[f'module.{address_prefix}["{hostname}"]' for hostname in hosts],
+        )
     except Timeout as exc:
         raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
-    logging.info("%s %s", command.value, hostlist)
+    logging.info("%s %s (%s)", command.value, hostlist, run_id)
 
-
-if __name__ == "__main__":
-    if sys.argv[1] == Commands.RESUME.value:
-        sys.exit(resume())
-    elif sys.argv[1] == Commands.SUSPEND.value:
-        sys.exit(suspend())
+    if command == Commands.RESUME_FAIL:
+        change_host_state(hostlist, "IDLE")

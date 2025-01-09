@@ -8,6 +8,7 @@ license = "MIT"
 [tool.poetry.dependencies]
 python = ">=3.6.2"
 python-hostlist = "^1.21"
+filelock = "^3.16.1"
 requests = ">=2"
 
 [tool.poetry.dev-dependencies]
@@ -20,3 +21,4 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.scripts]
 slurm_suspend = "slurm_autoscale_tfe:suspend"
 slurm_resume = "slurm_autoscale_tfe:resume"
+slurm_resume_fail = "slurm_autoscale_tfe:resume_fail"
