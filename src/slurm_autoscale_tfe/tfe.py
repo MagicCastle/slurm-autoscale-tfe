@@ -57,6 +57,18 @@ class TFECLient:
                 }
         return None
 
+    def fetch_resources(self):
+        """Get all resources from the workspace"""
+        url = "/".join((WORKSPACE_API, self.workspace, "resources"))
+        resources = []
+        while url is not None:
+            resp = requests.get(url, headers=self.headers, timeout=self.timeout)
+            json_ = resp.json()
+            data = json_["data"]
+            resources.extend(data)
+            url = json_["links"]["next"]
+        return resources
+
     def update_variable(self, var_id, value):
         """Update a workspace variable content"""
         patch_data = {
@@ -74,16 +86,27 @@ class TFECLient:
             url, headers=self.headers, json=patch_data, timeout=self.timeout
         )
 
-    def apply(self, message):
+    def apply(self, message, targets):
         """Queue a workspace run"""
         run_data = {
             "data": {
-                "attributes": {"message": message},
+                "attributes": {
+                    "message": message,
+                    "target-addrs": targets,
+                    "auto-apply": True,
+                },
                 "relationships": {
                     "workspace": {"data": {"type": "workspaces", "id": self.workspace}},
                 },
             }
         }
-        return requests.post(
+        resp = requests.post(
             RUNS_API, headers=self.headers, json=run_data, timeout=self.timeout
         )
+        return resp.json()["data"]["id"]
+
+    def get_run_status(self, run_id):
+        """Return status of run"""
+        url = "/".join((RUNS_API, run_id))
+        resp = requests.get(url, headers=self.headers, timeout=self.timeout)
+        return resp.json()["data"]["attributes"]["status"]
