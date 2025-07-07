@@ -151,19 +151,25 @@ def get_pool_from_tfe(tfe_client):
     return tfe_var["id"], frozenset()
 
 
-def get_instances_from_tfe(tfe_client):
-    """Return all names of instances that are created in Terraform Cloud state."""
-    try:
-        tfe_resources = tfe_client.fetch_resources()
-    except Timeout as exc:
-        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+def get_instances_from_tfe(tfe_resources, hosts):
+    """Return resource addresses from Terraform cloud that match hosts list."""
     instances = []
-    address_prefix = None
     for resource in tfe_resources:
-        if resource["attributes"]["provider-type"] in INSTANCE_TYPES:
-            instances.append(resource["attributes"]["name-index"])
-            address_prefix = resource["attributes"]["address"].split("[")[0]
-    return frozenset(instances), address_prefix
+        if ( resource["attributes"]["provider-type"] in INSTANCE_TYPES and
+             resource["attributes"]["name-index"] in hosts ):
+            instances.append(f"module.{resource['attributes']['address']}")
+    return frozenset(instances)
+
+
+def get_provisioners_from_tfe(tfe_resources):
+    """Return the provisioner resource address"""
+    provisioners = []
+    for resource in tfe_resources:
+        if resource["attributes"]["provider-type"] == "terraform_data":
+            address = resource['attributes']['address'].split(".")
+            address = f"module.{address[0]}.module.{address[1]}.{'.'.join(address[2:])}"
+            provisioners.append(address)
+    return frozenset(provisioners)
 
 
 def main(command, set_op, hostlist):
@@ -191,11 +197,17 @@ def main(command, set_op, hostlist):
                 hostlist,
             )
 
-    _, address_prefix = get_instances_from_tfe(tfe_client)
+    try:
+        tfe_resources = tfe_client.fetch_resources()
+    except Timeout as exc:
+        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+
+    instances = get_instances_from_tfe(tfe_resources, hosts)
+    provisioners = get_provisioners_from_tfe(tfe_resources)
     try:
         run_id = tfe_client.apply(
             f"Slurm {command.value} {hostlist}".strip(),
-            targets=[f'module.{address_prefix}["{hostname}"]' for hostname in hosts],
+            targets=list(instances | provisioners),
         )
     except Timeout as exc:
         raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
