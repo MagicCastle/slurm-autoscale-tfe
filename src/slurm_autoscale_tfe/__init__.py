@@ -31,6 +31,7 @@ INSTANCE_TYPES = frozenset(
         "azurerm_linux_virtual_machine",
         "google_compute_instance",
         "openstack_compute_instance_v2",
+        "incus_instance",
     ]
 )
 
