@@ -4,11 +4,12 @@
 import logging
 import re
 import sys
+import time
 
 from enum import Enum
 from os import environ
 from subprocess import run, PIPE
-from requests.exceptions import Timeout
+from requests.exceptions import Timeout, HTTPError
 
 from filelock import FileLock
 from hostlist import expand_hostlist
@@ -21,6 +22,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
+SLEEP_TIME = 10
 POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
 
 NODE_STATE_REGEX = re.compile(r"^NodeName=([a-z0-9-]*).*State=([A-Z_+]*).*$")
@@ -171,6 +173,39 @@ def get_provisioners_from_tfe(tfe_resources):
             provisioners.append(address)
     return frozenset(provisioners)
 
+def wait_on_workspace_lock(tfe_client, max_run_time=60):
+    """Wait up to 60 seconds per unique run for the workspace to unlock.
+    If the workspace is locked by a user or something else, throw an
+    AutoscaleException as there is no way of telling when the lock might
+    be lifted.
+    """
+    workspace_lock_count = 0
+    lock_run_id = None
+    while True:
+        try:
+            workspace_lock = tfe_client.get_workspace_lock()
+        except HTTPError as exc:
+            raise AutoscaleException(
+                "Could not retrieve workspace lock status, giving up scaling."
+            ) from exc
+        if not workspace_lock.locked:
+            return
+        if workspace_lock_count * SLEEP_TIME >= max_run_time and lock_run_id == workspace_lock.id:
+            raise AutoscaleException(
+                f"TFE workspace has been locked for "
+                f"{max_run_time}s by {lock_run_id}, giving up scaling."
+            )
+        if workspace_lock.type == 'runs':
+            if lock_run_id != workspace_lock.id:
+                lock_run_id = workspace_lock.id
+                workspace_lock_count = 0
+            else:
+                workspace_lock_count += 1
+            time.sleep(SLEEP_TIME)
+        else:
+            raise AutoscaleException(
+                f"TFE {workspace_lock.id} locked the workspace, cannot scale."
+            )
 
 def main(command, set_op, hostlist):
     """Issue a request to Terraform cloud to modify the pool variable of the
@@ -179,13 +214,17 @@ def main(command, set_op, hostlist):
     """
     hosts = frozenset(expand_hostlist(hostlist))
     tfe_client = connect_tfe_client()
-
     with FileLock("/tmp/slurm_autoscale_tfe_pool.lock"):
+        wait_on_workspace_lock(tfe_client, max_run_time=60)
         var_id, tfe_pool = get_pool_from_tfe(tfe_client)
         next_pool = set_op(tfe_pool, hosts)
         if tfe_pool != next_pool:
             try:
                 tfe_client.update_variable(var_id, list(next_pool))
+            except HTTPError as exc:
+                raise AutoscaleException(
+                    "TFE API returned an error code when trying to update the pool variable"
+                ) from exc
             except Timeout as exc:
                 raise AutoscaleException(
                     "Connection to Terraform cloud timeout (5s)"
@@ -199,6 +238,10 @@ def main(command, set_op, hostlist):
 
     try:
         tfe_resources = tfe_client.fetch_resources()
+    except HTTPError as exc:
+        raise AutoscaleException(
+            "TFE API returned an error code when trying to fetch the resources"
+        ) from exc
     except Timeout as exc:
         raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
 
@@ -209,6 +252,10 @@ def main(command, set_op, hostlist):
             f"Slurm {command.value} {hostlist}".strip(),
             targets=list(instances | provisioners),
         )
+    except HTTPError as exc:
+        raise AutoscaleException(
+            "TFE API returned an error code when trying to submit the run"
+        ) from exc
     except Timeout as exc:
         raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
     logging.info("%s %s (%s)", command.value, hostlist, run_id)
