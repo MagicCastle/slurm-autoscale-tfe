@@ -5,6 +5,7 @@ import json
 
 import requests
 from requests.structures import CaseInsensitiveDict
+from requests.exceptions import HTTPError
 
 WORKSPACE_API = "https://app.terraform.io/api/v2/workspaces"
 RUNS_API = "https://app.terraform.io/api/v2/runs"
@@ -37,17 +38,27 @@ class TFECLient:
 
         # Validate init parameters by trying to retrieve workspace
         url = "/".join((WORKSPACE_API, self.workspace))
-        resp = requests.get(url, headers=self.headers, timeout=self.timeout).json()
-        if "errors" in resp:
-            if resp["errors"][0]["status"] == "401":
+        resp = requests.get(url, headers=self.headers, timeout=self.timeout)
+        if not resp.ok:
+            if resp.status_code == 401:
                 raise InvalidAPIToken
-            if resp["errors"][0]["status"] == "404":
+            if resp.status_code == 404:
                 raise InvalidWorkspaceId
+
+    def is_workspace_locked(self):
+        url = "/".join((WORKSPACE_API, self.workspace))
+        resp = requests.get(url, headers=self.headers, timeout=self.timeout)
+        if not resp.ok:
+            raise HTTPError(f'Terraform Cloud API returned error code {resp.status_code}: {resp.reason}')
+        return resp.json()['data']['attributes']['locked']
 
     def fetch_variable(self, var_name):
         """Get a workspace variable content"""
         url = "/".join((WORKSPACE_API, self.workspace, "vars"))
         resp = requests.get(url, headers=self.headers, timeout=self.timeout)
+        if not resp.ok:
+            raise HTTPError(f'Terraform Cloud API returned error code {resp.status_code}: {resp.reason}')
+
         data = resp.json()["data"]
         for var in data:
             if var["attributes"]["key"] == var_name:
@@ -63,6 +74,8 @@ class TFECLient:
         resources = []
         while url is not None:
             resp = requests.get(url, headers=self.headers, timeout=self.timeout)
+            if not resp.ok:
+                raise HTTPError(f'Terraform Cloud API returned error code {resp.status_code}: {resp.reason}')
             json_ = resp.json()
             data = json_["data"]
             resources.extend(data)
@@ -82,9 +95,11 @@ class TFECLient:
             }
         }
         url = "/".join((WORKSPACE_API, self.workspace, "vars", var_id))
-        return requests.patch(
+        resp = requests.patch(
             url, headers=self.headers, json=patch_data, timeout=self.timeout
         )
+        if not resp.ok:
+            raise HTTPError(f'Terraform Cloud API returned error code {resp.status_code}: {resp.reason}')
 
     def apply(self, message, targets):
         """Queue a workspace run"""
@@ -103,10 +118,14 @@ class TFECLient:
         resp = requests.post(
             RUNS_API, headers=self.headers, json=run_data, timeout=self.timeout
         )
+        if not resp.ok:
+            raise HTTPError(f'Terraform Cloud API returned error code {resp.status_code}: {resp.reason}')
         return resp.json()["data"]["id"]
 
     def get_run_status(self, run_id):
         """Return status of run"""
         url = "/".join((RUNS_API, run_id))
         resp = requests.get(url, headers=self.headers, timeout=self.timeout)
+        if not resp.ok:
+            raise HTTPError(f'Terraform Cloud API returned error code {resp.status_code}: {resp.reason}')
         return resp.json()["data"]["attributes"]["status"]
