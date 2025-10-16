@@ -1,5 +1,4 @@
-"""Module providing the class to interact with Terraform Cloud API
-"""
+"""Module providing the class to interact with Terraform Cloud API"""
 
 import json
 
@@ -13,7 +12,8 @@ WORKSPACE_API = "https://app.terraform.io/api/v2/workspaces"
 RUNS_API = "https://app.terraform.io/api/v2/runs"
 API_CONTENT = "application/vnd.api+json"
 
-WorkspaceLock = namedtuple('WorkspaceLock', ['locked', 'type', 'id'])
+WorkspaceLock = namedtuple("WorkspaceLock", ["locked", "type", "id"])
+
 
 class InvalidAPIToken(Exception):
     """Raised when the TFE API token is invalid"""
@@ -55,11 +55,13 @@ class TFECLient:
         url = "/".join((WORKSPACE_API, self.workspace))
         resp = requests.get(url, headers=self.headers, timeout=self.timeout)
         if not resp.ok:
-            raise HTTPError(f'TFE API returned error code {resp.status_code}: {resp.reason}')
-        data = resp.json()['data']
-        if data['attributes']['locked']:
-            lock_type = data['relationships']['locked-by']['data']['type']
-            lock_id = data['relationships']['locked-by']['data']['id']
+            raise HTTPError(
+                f"TFE API returned error code {resp.status_code}: {resp.reason}"
+            )
+        data = resp.json()["data"]
+        if data["attributes"]["locked"]:
+            lock_type = data["relationships"]["locked-by"]["data"]["type"]
+            lock_id = data["relationships"]["locked-by"]["data"]["id"]
             return WorkspaceLock(locked=True, type=lock_type, id=lock_id)
         return WorkspaceLock(locked=False, type=None, id=None)
 
@@ -68,7 +70,9 @@ class TFECLient:
         url = "/".join((WORKSPACE_API, self.workspace, "vars"))
         resp = requests.get(url, headers=self.headers, timeout=self.timeout)
         if not resp.ok:
-            raise HTTPError(f'TFE API returned error code {resp.status_code}: {resp.reason}')
+            raise HTTPError(
+                f"TFE API returned error code {resp.status_code}: {resp.reason}"
+            )
 
         data = resp.json()["data"]
         for var in data:
@@ -86,7 +90,9 @@ class TFECLient:
         while url is not None:
             resp = requests.get(url, headers=self.headers, timeout=self.timeout)
             if not resp.ok:
-                raise HTTPError(f'TFE API returned error code {resp.status_code}: {resp.reason}')
+                raise HTTPError(
+                    f"TFE API returned error code {resp.status_code}: {resp.reason}"
+                )
             json_ = resp.json()
             data = json_["data"]
             resources.extend(data)
@@ -110,7 +116,9 @@ class TFECLient:
             url, headers=self.headers, json=patch_data, timeout=self.timeout
         )
         if not resp.ok:
-            raise HTTPError(f'TFE API returned error code {resp.status_code}: {resp.reason}')
+            raise HTTPError(
+                f"TFE API returned error code {resp.status_code}: {resp.reason}"
+            )
 
     def apply(self, message, targets):
         """Queue a workspace run"""
@@ -130,7 +138,9 @@ class TFECLient:
             RUNS_API, headers=self.headers, json=run_data, timeout=self.timeout
         )
         if not resp.ok:
-            raise HTTPError(f'TFE API returned error code {resp.status_code}: {resp.reason}')
+            raise HTTPError(
+                f"TFE API returned error code {resp.status_code}: {resp.reason}"
+            )
         return resp.json()["data"]["id"]
 
     def get_run_status(self, run_id):
@@ -138,5 +148,7 @@ class TFECLient:
         url = "/".join((RUNS_API, run_id))
         resp = requests.get(url, headers=self.headers, timeout=self.timeout)
         if not resp.ok:
-            raise HTTPError(f'TFE API returned error code {resp.status_code}: {resp.reason}')
+            raise HTTPError(
+                f"TFE API returned error code {resp.status_code}: {resp.reason}"
+            )
         return resp.json()["data"]["attributes"]["status"]

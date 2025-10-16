@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Main module providing Slurm autoscaling functions with Terraform Cloud
-"""
+"""Main module providing Slurm autoscaling functions with Terraform Cloud"""
 import logging
 import re
 import sys
 import time
+import json
 
 from enum import Enum
 from os import environ
@@ -12,7 +12,7 @@ from subprocess import run, PIPE
 from requests.exceptions import Timeout, HTTPError
 
 from filelock import FileLock
-from hostlist import expand_hostlist
+from hostlist import collect_hostlist, expand_hostlist
 
 from .tfe import TFECLient, InvalidAPIToken, InvalidWorkspaceId
 
@@ -71,6 +71,66 @@ def change_host_state(hostlist, state, reason=None):
         )
 
 
+def list_nodes_with_states(states):
+    try:
+        scontrol_run = run(
+            ["scontrol", "show", "node", "--json"],
+            stdout=PIPE,
+            stderr=PIPE,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise AutoscaleException("Cannot find command scontrol") from exc
+    if scontrol_run.stderr:
+        raise AutoscaleException(
+            f"Error while calling scontrol update: {scontrol_run.stderr.decode()}"
+        )
+    all_nodes = json.loads(scontrol_run.stdout.decode())
+    states_nodes = set(
+        node["hostname"]
+        for node in all_nodes["nodes"]
+        if all(state in node["state"] for state in states)
+    )
+    return states_nodes
+
+
+def create_maint_resv(hostlist, duration="5:00"):
+    """Create a maintenance reservation starting now and lasting {duration}
+    on the provided list of nodes.
+    """
+    try:
+        scontrol_run = run(
+            [
+                "scontrol",
+                "create",
+                "reservation",
+                "StartTime=now",
+                "Flags=MAINT",
+                f"Nodes={hostlist}",
+                f"Duration={duration}",
+                "User=root",
+            ],
+            stdout=PIPE,
+            stderr=PIPE,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise AutoscaleException("Cannot find command scontrol") from exc
+    if scontrol_run.stderr:
+        raise AutoscaleException(
+            f"Error while calling scontrol update: {scontrol_run.stderr.decode()}"
+        )
+
+
+def suspend_cloud_scaling(hostlist=None, duration="5:00"):
+    nodes = set()
+    if hostlist is not None:
+        nodes.update(expand_hostlist(hostlist))
+    nodes.update(list_nodes_with_states(("POWERED_DOWN", "CLOUD")))
+    resv_hostlist = collect_hostlist(nodes)
+    create_maint_resv(resv_hostlist, duration=duration)
+
+
 def resume(hostlist=sys.argv[-1]):
     """Issue a request to Terraform cloud to power up the instances listed in
     hostlist.
@@ -79,7 +139,7 @@ def resume(hostlist=sys.argv[-1]):
         main(Commands.RESUME, frozenset.union, hostlist)
     except AutoscaleException as exc:
         logging.error("Failed to resume '%s': %s", hostlist, str(exc))
-        change_host_state(hostlist, "DOWN", reason=str(exc))
+        suspend_cloud_scaling(hostlist)
         return 1
     return 0
 
@@ -92,7 +152,7 @@ def suspend(hostlist=sys.argv[-1]):
         main(Commands.SUSPEND, frozenset.difference, hostlist)
     except AutoscaleException as exc:
         logging.error("Failed to suspend '%s': %s", hostlist, str(exc))
-        change_host_state(hostlist, "DOWN", reason=str(exc))
+        suspend_cloud_scaling(hostlist)
         return 1
     return 0
 
@@ -105,7 +165,7 @@ def resume_fail(hostlist=sys.argv[-1]):
         main(Commands.RESUME_FAIL, frozenset.difference, hostlist)
     except AutoscaleException as exc:
         logging.error("Failed to resume_fail '%s': %s", hostlist, str(exc))
-        change_host_state(hostlist, "DOWN", reason=str(exc))
+        suspend_cloud_scaling(hostlist)
         return 1
     return 0
 
@@ -157,8 +217,10 @@ def get_instances_from_tfe(tfe_resources, hosts):
     """Return resource addresses from Terraform cloud that match hosts list."""
     instances = []
     for resource in tfe_resources:
-        if ( resource["attributes"]["provider-type"] in INSTANCE_TYPES and
-             resource["attributes"]["name-index"] in hosts ):
+        if (
+            resource["attributes"]["provider-type"] in INSTANCE_TYPES
+            and resource["attributes"]["name-index"] in hosts
+        ):
             instances.append(f"module.{resource['attributes']['address']}")
     return frozenset(instances)
 
@@ -168,10 +230,11 @@ def get_provisioners_from_tfe(tfe_resources):
     provisioners = []
     for resource in tfe_resources:
         if resource["attributes"]["provider-type"] == "terraform_data":
-            address = resource['attributes']['address'].split(".")
+            address = resource["attributes"]["address"].split(".")
             address = f"module.{address[0]}.module.{address[1]}.{'.'.join(address[2:])}"
             provisioners.append(address)
     return frozenset(provisioners)
+
 
 def wait_on_workspace_lock(tfe_client, max_run_time=60):
     """Wait up to 60 seconds per unique run for the workspace to unlock.
@@ -190,12 +253,15 @@ def wait_on_workspace_lock(tfe_client, max_run_time=60):
             ) from exc
         if not workspace_lock.locked:
             return
-        if workspace_lock_count * SLEEP_TIME >= max_run_time and lock_run_id == workspace_lock.id:
+        if (
+            workspace_lock_count * SLEEP_TIME >= max_run_time
+            and lock_run_id == workspace_lock.id
+        ):
             raise AutoscaleException(
                 f"TFE workspace has been locked for "
                 f"{max_run_time}s by {lock_run_id}, giving up scaling."
             )
-        if workspace_lock.type == 'runs':
+        if workspace_lock.type == "runs":
             if lock_run_id != workspace_lock.id:
                 lock_run_id = workspace_lock.id
                 workspace_lock_count = 0
@@ -206,6 +272,7 @@ def wait_on_workspace_lock(tfe_client, max_run_time=60):
             raise AutoscaleException(
                 f"TFE {workspace_lock.id} locked the workspace, cannot scale."
             )
+
 
 def main(command, set_op, hostlist):
     """Issue a request to Terraform cloud to modify the pool variable of the
