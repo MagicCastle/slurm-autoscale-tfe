@@ -232,7 +232,7 @@ def get_provisioners_from_tfe(tfe_resources):
     return frozenset(provisioners)
 
 
-def wait_on_workspace_lock(tfe_client, max_run_time=60):
+def wait_on_workspace_lock(tfe_client, max_run_time=300):
     """Wait up to 60 seconds per unique run for the workspace to unlock.
     If the workspace is locked by a user or something else, throw an
     AutoscaleException as there is no way of telling when the lock might
@@ -248,6 +248,12 @@ def wait_on_workspace_lock(tfe_client, max_run_time=60):
                 "Could not retrieve workspace lock status, giving up scaling. "
                 f"{exc}"
             ) from exc
+        except TimeoutError as exc:
+            logging.warning(
+                f'Timeout reach while trying to fetch workspace lock, retry in {SLEEP_TIME}s...',
+            )
+            time.sleep(SLEEP_TIME)
+            continue
         if not workspace_lock.locked:
             return
         if (
