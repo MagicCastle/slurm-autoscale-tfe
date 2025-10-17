@@ -141,6 +141,7 @@ def resume(hostlist=sys.argv[-1]):
         main(Commands.RESUME, frozenset.union, hostlist)
     except AutoscaleException as exc:
         logging.error("Failed to resume '%s': %s", hostlist, str(exc))
+        change_host_state(hostlist, state="POWER_DOWN_FORCE", reason="failed to resume")
         suspend_cloud_scaling(hostlist)
         return 1
     return 0
@@ -244,7 +245,8 @@ def wait_on_workspace_lock(tfe_client, max_run_time=60):
             workspace_lock = tfe_client.get_workspace_lock()
         except HTTPError as exc:
             raise AutoscaleException(
-                "Could not retrieve workspace lock status, giving up scaling."
+                "Could not retrieve workspace lock status, giving up scaling. "
+                f"{exc}"
             ) from exc
         if not workspace_lock.locked:
             return
@@ -285,7 +287,8 @@ def main(command, set_op, hostlist):
                 tfe_client.update_variable(var_id, list(next_pool))
             except HTTPError as exc:
                 raise AutoscaleException(
-                    "TFE API returned an error code when trying to update the pool variable"
+                    f"TFE API returned an error code when trying to update the pool variable. "
+                    f"{exc}"
                 ) from exc
             except Timeout as exc:
                 raise AutoscaleException(
@@ -302,7 +305,8 @@ def main(command, set_op, hostlist):
         tfe_resources = tfe_client.fetch_resources()
     except HTTPError as exc:
         raise AutoscaleException(
-            "TFE API returned an error code when trying to fetch the resources"
+            f"TFE API returned an error code when trying to fetch the resources. "
+            f"{exc}"
         ) from exc
     except Timeout as exc:
         raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
@@ -316,7 +320,8 @@ def main(command, set_op, hostlist):
         )
     except HTTPError as exc:
         raise AutoscaleException(
-            "TFE API returned an error code when trying to submit the run"
+            f"TFE API returned an error code when trying to submit the run."
+            f"{exc}"
         ) from exc
     except Timeout as exc:
         raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
