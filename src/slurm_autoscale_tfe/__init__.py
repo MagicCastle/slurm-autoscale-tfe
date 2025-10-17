@@ -124,19 +124,19 @@ def create_maint_resv(hostlist, duration="5:00"):
 
 
 def suspend_cloud_scaling(hostlist=None, duration="5:00"):
-    nodes = set()
-    if hostlist is not None:
-        nodes.update(expand_hostlist(hostlist))
-    nodes.update(list_nodes_with_states(("POWERED_DOWN", "CLOUD")))
-    resv_hostlist = collect_hostlist(nodes)
+    # nodes = set()
+    # if hostlist is not None:
+    #     nodes.update(expand_hostlist(hostlist))
+    # nodes.update(list_nodes_with_states(("POWERED_DOWN", "CLOUD")))
+    # resv_hostlist = collect_hostlist(nodes)
     # To create a maintenance reservation of {duration}, the nodes
     # need to be not busy, so we change their state to DOWN first
     # so we can create the reservation. Once the reservation is
     # set, we can put them back in IDLE state, so job can be scheduled
     # once the maintenance {duration} is over.
-    change_host_state(resv_hostlist, state="DOWN", reason="suspend cloud scaling")
-    create_maint_resv(resv_hostlist, duration=duration)
-    change_host_state(resv_hostlist, state="IDLE")
+    change_host_state(hostlist, state="DOWN", reason="suspend cloud scaling")
+    create_maint_resv(hostlist, duration=duration)
+    change_host_state(hostlist, state="IDLE")
 
 
 def resume(hostlist=sys.argv[-1]):
