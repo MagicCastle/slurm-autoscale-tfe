@@ -14,7 +14,7 @@ from requests.exceptions import Timeout, HTTPError
 from filelock import FileLock
 from hostlist import collect_hostlist, expand_hostlist
 
-from .tfe import TFECLient, InvalidAPIToken, InvalidWorkspaceId
+from .tfe import TFECLient
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
@@ -170,7 +170,7 @@ def resume_fail(hostlist=sys.argv[-1]):
     return 0
 
 
-def connect_tfe_client():
+def create_tfe_client():
     """Return a TFE client object using environment variables for authentication"""
     if "TFE_TOKEN" not in environ:
         raise AutoscaleException(
@@ -181,17 +181,10 @@ def connect_tfe_client():
             f"{sys.argv[0]} requires environment variable TFE_WORKSPACE"
         )
 
-    try:
-        return TFECLient(
-            token=environ["TFE_TOKEN"],
-            workspace=environ["TFE_WORKSPACE"],
-        )
-    except InvalidAPIToken as exc:
-        raise AutoscaleException("invalid TFE API token") from exc
-    except InvalidWorkspaceId as exc:
-        raise AutoscaleException("invalid TFE workspace id") from exc
-    except Timeout as exc:
-        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+    return TFECLient(
+        token=environ["TFE_TOKEN"],
+        workspace=environ["TFE_WORKSPACE"],
+    )
 
 
 def get_pool_from_tfe(tfe_client):
@@ -280,7 +273,7 @@ def main(command, set_op, hostlist):
     provided as set_op and the hostnames provided in hostlist.
     """
     hosts = frozenset(expand_hostlist(hostlist))
-    tfe_client = connect_tfe_client()
+    tfe_client = create_tfe_client()
     with FileLock("/tmp/slurm_autoscale_tfe_pool.lock"):
         wait_on_workspace_lock(tfe_client, max_run_time=60)
         var_id, tfe_pool = get_pool_from_tfe(tfe_client)

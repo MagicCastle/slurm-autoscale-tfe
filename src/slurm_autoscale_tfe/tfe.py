@@ -14,15 +14,6 @@ API_CONTENT = "application/vnd.api+json"
 
 WorkspaceLock = namedtuple("WorkspaceLock", ["locked", "type", "id"])
 
-
-class InvalidAPIToken(Exception):
-    """Raised when the TFE API token is invalid"""
-
-
-class InvalidWorkspaceId(Exception):
-    """Raised when the TFE workspace ID is invalid"""
-
-
 class TFECLient:
     """TFEClient provides functions to:
     - retrieve a Terraform Cloud variable content
@@ -39,25 +30,40 @@ class TFECLient:
         self.headers["Authorization"] = f"Bearer {token}"
         self.timeout = timeout
 
-        # Validate init parameters by trying to retrieve workspace
-        url = "/".join((WORKSPACE_API, self.workspace))
+    def get(self, url):
         resp = requests.get(url, headers=self.headers, timeout=self.timeout)
         if not resp.ok:
-            if resp.status_code == 401:
-                raise InvalidAPIToken
-            if resp.status_code == 404:
-                raise InvalidWorkspaceId
+            raise HTTPError(
+                f"TFE API returned error code {resp.status_code}: {resp.reason}"
+            )
+        return resp
+
+    def patch(self, url, **kargs):
+        resp = requests.patch(
+            url, headers=self.headers, timeout=self.timeout, **kargs,
+        )
+        if not resp.ok:
+            raise HTTPError(
+                f"TFE API returned error code {resp.status_code}: {resp.reason}"
+            )
+        return resp
+
+    def post(self, url, **kargs):
+        resp = requests.post(
+            url, headers=self.headers, timeout=self.timeout, **kargs
+        )
+        if not resp.ok:
+            raise HTTPError(
+                f"TFE API returned error code {resp.status_code}: {resp.reason}"
+            )
+        return resp
 
     def get_workspace_lock(self):
         """Return a WorkspaceLock named tuple with the workspace lock state
         (locked, type, id).
         """
         url = "/".join((WORKSPACE_API, self.workspace))
-        resp = requests.get(url, headers=self.headers, timeout=self.timeout)
-        if not resp.ok:
-            raise HTTPError(
-                f"TFE API returned error code {resp.status_code}: {resp.reason}"
-            )
+        resp = self.get(url)
         data = resp.json()["data"]
         if data["attributes"]["locked"]:
             lock_type = data["relationships"]["locked-by"]["data"]["type"]
@@ -68,12 +74,7 @@ class TFECLient:
     def fetch_variable(self, var_name):
         """Get a workspace variable content"""
         url = "/".join((WORKSPACE_API, self.workspace, "vars"))
-        resp = requests.get(url, headers=self.headers, timeout=self.timeout)
-        if not resp.ok:
-            raise HTTPError(
-                f"TFE API returned error code {resp.status_code}: {resp.reason}"
-            )
-
+        resp = self.get(url)
         data = resp.json()["data"]
         for var in data:
             if var["attributes"]["key"] == var_name:
@@ -88,11 +89,7 @@ class TFECLient:
         url = "/".join((WORKSPACE_API, self.workspace, "resources"))
         resources = []
         while url is not None:
-            resp = requests.get(url, headers=self.headers, timeout=self.timeout)
-            if not resp.ok:
-                raise HTTPError(
-                    f"TFE API returned error code {resp.status_code}: {resp.reason}"
-                )
+            resp = self.get(url)
             json_ = resp.json()
             data = json_["data"]
             resources.extend(data)
@@ -112,13 +109,8 @@ class TFECLient:
             }
         }
         url = "/".join((WORKSPACE_API, self.workspace, "vars", var_id))
-        resp = requests.patch(
-            url, headers=self.headers, json=patch_data, timeout=self.timeout
-        )
-        if not resp.ok:
-            raise HTTPError(
-                f"TFE API returned error code {resp.status_code}: {resp.reason}"
-            )
+        resp = self.patch(url, json=patch_data)
+        return resp
 
     def apply(self, message, targets):
         """Queue a workspace run"""
@@ -134,21 +126,11 @@ class TFECLient:
                 },
             }
         }
-        resp = requests.post(
-            RUNS_API, headers=self.headers, json=run_data, timeout=self.timeout
-        )
-        if not resp.ok:
-            raise HTTPError(
-                f"TFE API returned error code {resp.status_code}: {resp.reason}"
-            )
+        resp = self.post(RUNS_API, json=run_data)
         return resp.json()["data"]["id"]
 
     def get_run_status(self, run_id):
         """Return status of run"""
         url = "/".join((RUNS_API, run_id))
-        resp = requests.get(url, headers=self.headers, timeout=self.timeout)
-        if not resp.ok:
-            raise HTTPError(
-                f"TFE API returned error code {resp.status_code}: {resp.reason}"
-            )
+        resp = self.get(url)
         return resp.json()["data"]["attributes"]["status"]
