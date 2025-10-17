@@ -201,7 +201,9 @@ def get_pool_from_tfe(tfe_client):
     try:
         tfe_var = tfe_client.fetch_variable(POOL_VAR)
     except Timeout as exc:
-        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+        raise AutoscaleException(
+            f"Connection to Terraform cloud timeout ({tfe_client.timeout}s)"
+        ) from exc
 
     if tfe_var is None:
         raise AutoscaleException(
@@ -298,7 +300,7 @@ def main(command, set_op, hostlist):
                 ) from exc
             except Timeout as exc:
                 raise AutoscaleException(
-                    "Connection to Terraform cloud timeout (5s)"
+                    f"Connection to Terraform cloud timeout ({tfe_client.timeout}s)"
                 ) from exc
         else:
             logging.warning(
@@ -315,7 +317,9 @@ def main(command, set_op, hostlist):
             f"{exc}"
         ) from exc
     except Timeout as exc:
-        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+        raise AutoscaleException(
+            f"Connection to Terraform cloud timeout ({tfe_client.timeout}s)"
+        ) from exc
 
     instances = get_instances_from_tfe(tfe_resources, hosts)
     provisioners = get_provisioners_from_tfe(tfe_resources)
@@ -330,7 +334,9 @@ def main(command, set_op, hostlist):
             f"{exc}"
         ) from exc
     except Timeout as exc:
-        raise AutoscaleException("Connection to Terraform cloud timeout (5s)") from exc
+        raise AutoscaleException(
+            f"Connection to Terraform cloud timeout ({tfe_client.timeout}s)"
+        ) from exc
     logging.info("%s %s (%s)", command.value, hostlist, run_id)
 
     if command == Commands.RESUME_FAIL:
