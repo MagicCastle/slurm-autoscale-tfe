@@ -128,7 +128,9 @@ def suspend_cloud_scaling(hostlist=None, duration="5:00"):
         nodes.update(expand_hostlist(hostlist))
     nodes.update(list_nodes_with_states(("POWERED_DOWN", "CLOUD")))
     resv_hostlist = collect_hostlist(nodes)
+    change_host_state(resv_hostlist, state="DOWN", reason="suspend cloud scaling")
     create_maint_resv(resv_hostlist, duration=duration)
+    change_host_state(resv_hostlist, state="IDLE")
 
 
 def resume(hostlist=sys.argv[-1]):
