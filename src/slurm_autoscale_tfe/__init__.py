@@ -3,19 +3,18 @@
 import logging
 import re
 import sys
-import time
 import json
 
 from enum import Enum
 from os import environ
 from subprocess import run, PIPE
-from requests.exceptions import Timeout, HTTPError
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 from filelock import FileLock
-from hostlist import collect_hostlist, expand_hostlist
+from hostlist import expand_hostlist
+from requests.exceptions import Timeout, HTTPError
 
-from .tfe import TFECLient
+from .tfe import TFEClient
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
@@ -23,11 +22,8 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-SLEEP_TIME = 10
 POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
 
-NODE_STATE_REGEX = re.compile(r"^NodeName=([a-z0-9-]*).*State=([A-Z_+]*).*$")
-DOWN_FLAG_SET = frozenset(["DOWN", "POWER_DOWN", "POWERED_DOWN", "POWERING_DOWN"])
 INSTANCE_TYPES = frozenset(
     [
         "aws_instance",
@@ -73,6 +69,10 @@ def change_host_state(hostlist, state, reason=None):
 
 
 def list_nodes_with_states(states):
+    """Return a list of hostnames that present all {states} in their
+    state list when listing their attributes with:
+      scontrol show node --json <node_name>
+    """
     try:
         scontrol_run = run(
             ["scontrol", "show", "node", "--json"],
@@ -84,7 +84,7 @@ def list_nodes_with_states(states):
         raise AutoscaleException("Cannot find command scontrol") from exc
     if scontrol_run.stderr:
         raise AutoscaleException(
-            f"Error while calling scontrol update: {scontrol_run.stderr.decode()}"
+            f"Error while calling scontrol show: {scontrol_run.stderr.decode()}"
         )
     all_nodes = json.loads(scontrol_run.stdout.decode())
     states_nodes = set(
@@ -125,11 +125,17 @@ def create_maint_resv(hostlist, comment, duration="5:00"):
 
 
 def suspend_cloud_scaling(hostlist, comment, duration="5:00"):
-    # nodes = set()
-    # if hostlist is not None:
-    #     nodes.update(expand_hostlist(hostlist))
-    # nodes.update(list_nodes_with_states(("POWERED_DOWN", "CLOUD")))
-    # resv_hostlist = collect_hostlist(nodes)
+    """Prevent Slurm from scheduling jobs on the nodes in {hostlist}
+    for {duration}.
+
+    If at some point we want to pause scheduling on all cloud nodes
+    that are powered down, we would do the following
+        nodes = set()
+        if hostlist is not None:
+        nodes.update(expand_hostlist(hostlist))
+        nodes.update(list_nodes_with_states(("POWERED_DOWN", "CLOUD")))
+        hostlist = collect_hostlist(nodes)
+    """
     # To create a maintenance reservation of {duration}, the nodes
     # need to be not busy, so we change their state to DOWN first
     # so we can create the reservation. Once the reservation is
@@ -147,9 +153,10 @@ def resume(hostlist=sys.argv[-1]):
     try:
         main(Commands.RESUME, frozenset.union, hostlist)
     except AutoscaleException as exc:
-        logging.error("Failed to resume '%s': %s", hostlist, str(exc))
+        msg = f"Failed to resume '{hostlist}': {exc}"
+        logging.error(msg)
         change_host_state(hostlist, state="POWER_DOWN_FORCE", reason="failed to resume")
-        suspend_cloud_scaling(hostlist, comment=str(exc))
+        suspend_cloud_scaling(hostlist, comment=msg)
         return 1
     return 0
 
@@ -161,8 +168,9 @@ def suspend(hostlist=sys.argv[-1]):
     try:
         main(Commands.SUSPEND, frozenset.difference, hostlist)
     except AutoscaleException as exc:
-        logging.error("Failed to suspend '%s': %s", hostlist, str(exc))
-        suspend_cloud_scaling(hostlist, comment=str(exc))
+        msg = f"Failed to suspend '{hostlist}': {exc}"
+        logging.error(msg)
+        suspend_cloud_scaling(hostlist, comment=msg)
         return 1
     return 0
 
@@ -174,8 +182,9 @@ def resume_fail(hostlist=sys.argv[-1]):
     try:
         main(Commands.RESUME_FAIL, frozenset.difference, hostlist)
     except AutoscaleException as exc:
-        logging.error("Failed to resume_fail '%s': %s", hostlist, str(exc))
-        suspend_cloud_scaling(hostlist, comment=str(exc))
+        msg = f"Failed to resume_fail '{hostlist}': {exc}"
+        logging.error(msg)
+        suspend_cloud_scaling(hostlist, comment=str(msg))
         return 1
     return 0
 
@@ -191,7 +200,7 @@ def create_tfe_client():
             f"{sys.argv[0]} requires environment variable TFE_WORKSPACE"
         )
 
-    return TFECLient(
+    return TFEClient(
         token=environ["TFE_TOKEN"],
         workspace=environ["TFE_WORKSPACE"],
     )
@@ -246,22 +255,12 @@ def check_workspace_lock(tfe_client, max_run_time=300):
     locked by a single run for more than max_run_time. In which case, there is
     little hope of this run executing on time, so we give up.
     """
-    lock_run_id = None
-    while True:
-        try:
-            workspace_lock = tfe_client.get_workspace_lock()
-        except HTTPError as exc:
-            raise AutoscaleException(
-                "Could not retrieve workspace lock status, giving up scaling. "
-                f"{exc}"
-            ) from exc
-        except TimeoutError as exc:
-            logging.warning(
-                f'Timeout reach while trying to fetch workspace lock status, retry in {SLEEP_TIME}s...',
-            )
-            time.sleep(SLEEP_TIME)
-            continue
-        break
+    try:
+        workspace_lock = tfe_client.get_workspace_lock()
+    except HTTPError as exc:
+        raise AutoscaleException(
+            f"Could not retrieve workspace lock status, giving up scaling. {exc}"
+        ) from exc
 
     if not workspace_lock.locked:
         return
@@ -271,13 +270,11 @@ def check_workspace_lock(tfe_client, max_run_time=300):
             f"TFE {workspace_lock.id} locked the workspace, cannot scale."
         )
 
-
-    if (datetime.now(tz=UTC) - workspace_lock.last_update).seconds > max_run_time:
+    if (datetime.now(tz=timezone.utc) - workspace_lock.last_update).seconds > max_run_time:
         raise AutoscaleException(
-            f"TFE workspace has been locked for more than"
-            f"{max_run_time}s by {lock_run_id}, giving up scaling."
+            f"TFE workspace has been locked for more than "
+            f"{max_run_time}s by {workspace_lock.id}, giving up scaling."
         )
-
 
 
 def main(command, set_op, hostlist):
@@ -296,8 +293,7 @@ def main(command, set_op, hostlist):
                 tfe_client.update_variable(var_id, list(next_pool))
             except HTTPError as exc:
                 raise AutoscaleException(
-                    f"TFE API returned an error code when trying to update the pool variable. "
-                    f"{exc}"
+                    f"TFE API returned an error code when trying to update the pool variable. {exc}"
                 ) from exc
             except Timeout as exc:
                 raise AutoscaleException(
@@ -314,8 +310,7 @@ def main(command, set_op, hostlist):
         tfe_resources = tfe_client.fetch_resources()
     except HTTPError as exc:
         raise AutoscaleException(
-            f"TFE API returned an error code when trying to fetch the resources. "
-            f"{exc}"
+            f"TFE API returned an error code when trying to fetch the resources. {exc}"
         ) from exc
     except Timeout as exc:
         raise AutoscaleException(
@@ -331,8 +326,7 @@ def main(command, set_op, hostlist):
         )
     except HTTPError as exc:
         raise AutoscaleException(
-            f"TFE API returned an error code when trying to submit the run."
-            f"{exc}"
+            f"TFE API returned an error code when trying to submit the run. {exc}"
         ) from exc
     except Timeout as exc:
         raise AutoscaleException(
