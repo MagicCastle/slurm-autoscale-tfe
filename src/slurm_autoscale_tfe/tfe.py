@@ -3,6 +3,7 @@
 import json
 
 from collections import namedtuple
+from datetime import datetime, UTC
 
 import requests
 from requests.structures import CaseInsensitiveDict
@@ -12,7 +13,7 @@ WORKSPACE_API = "https://app.terraform.io/api/v2/workspaces"
 RUNS_API = "https://app.terraform.io/api/v2/runs"
 API_CONTENT = "application/vnd.api+json"
 
-WorkspaceLock = namedtuple("WorkspaceLock", ["locked", "type", "id"])
+WorkspaceLock = namedtuple("WorkspaceLock", ["locked", "type", "id", "last_update"])
 
 class TFECLient:
     """TFEClient provides functions to:
@@ -68,8 +69,11 @@ class TFECLient:
         if data["attributes"]["locked"]:
             lock_type = data["relationships"]["locked-by"]["data"]["type"]
             lock_id = data["relationships"]["locked-by"]["data"]["id"]
-            return WorkspaceLock(locked=True, type=lock_type, id=lock_id)
-        return WorkspaceLock(locked=False, type=None, id=None)
+            last_update = datetime.strptime(
+                data["attributes"]["updated-at"], '%Y-%m-%dT%H:%M:%S.%fZ'
+            ).replace(tzinfo=UTC)
+            return WorkspaceLock(locked=True, type=lock_type, id=lock_id, last_update=last_update)
+        return WorkspaceLock(locked=False, type=None, id=None, last_update=None)
 
     def fetch_variable(self, var_name):
         """Get a workspace variable content"""

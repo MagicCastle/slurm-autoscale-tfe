@@ -10,6 +10,7 @@ from enum import Enum
 from os import environ
 from subprocess import run, PIPE
 from requests.exceptions import Timeout, HTTPError
+from datetime import datetime, UTC
 
 from filelock import FileLock
 from hostlist import collect_hostlist, expand_hostlist
@@ -237,13 +238,11 @@ def get_provisioners_from_tfe(tfe_resources):
     return frozenset(provisioners)
 
 
-def wait_on_workspace_lock(tfe_client, max_run_time=300):
-    """Wait up to 60 seconds per unique run for the workspace to unlock.
-    If the workspace is locked by a user or something else, throw an
-    AutoscaleException as there is no way of telling when the lock might
-    be lifted.
+def check_workspace_lock(tfe_client, max_run_time=300):
+    """Check if the workspace is currently locked by a user or if it has been
+    locked by a single run for more than max_run_time. In which case, there is
+    little hope of this run executing on time, so we give up.
     """
-    workspace_lock_count = 0
     lock_run_id = None
     while True:
         try:
@@ -255,31 +254,27 @@ def wait_on_workspace_lock(tfe_client, max_run_time=300):
             ) from exc
         except TimeoutError as exc:
             logging.warning(
-                f'Timeout reach while trying to fetch workspace lock, retry in {SLEEP_TIME}s...',
+                f'Timeout reach while trying to fetch workspace lock status, retry in {SLEEP_TIME}s...',
             )
             time.sleep(SLEEP_TIME)
             continue
-        if not workspace_lock.locked:
-            return
-        if (
-            workspace_lock_count * SLEEP_TIME >= max_run_time
-            and lock_run_id == workspace_lock.id
-        ):
-            raise AutoscaleException(
-                f"TFE workspace has been locked for "
-                f"{max_run_time}s by {lock_run_id}, giving up scaling."
-            )
-        if workspace_lock.type == "runs":
-            if lock_run_id != workspace_lock.id:
-                lock_run_id = workspace_lock.id
-                workspace_lock_count = 0
-            else:
-                workspace_lock_count += 1
-            time.sleep(SLEEP_TIME)
-        else:
-            raise AutoscaleException(
-                f"TFE {workspace_lock.id} locked the workspace, cannot scale."
-            )
+        break
+
+    if not workspace_lock.locked:
+        return
+
+    if workspace_lock.type != "runs":
+        raise AutoscaleException(
+            f"TFE {workspace_lock.id} locked the workspace, cannot scale."
+        )
+
+
+    if (datetime.now(tz=UTC) - workspace_lock.last_update).seconds > max_run_time:
+        raise AutoscaleException(
+            f"TFE workspace has been locked for more than"
+            f"{max_run_time}s by {lock_run_id}, giving up scaling."
+        )
+
 
 
 def main(command, set_op, hostlist):
@@ -290,7 +285,7 @@ def main(command, set_op, hostlist):
     hosts = frozenset(expand_hostlist(hostlist))
     tfe_client = create_tfe_client()
     with FileLock("/tmp/slurm_autoscale_tfe_pool.lock"):
-        wait_on_workspace_lock(tfe_client, max_run_time=60)
+        check_workspace_lock(tfe_client, max_run_time=300)
         var_id, tfe_pool = get_pool_from_tfe(tfe_client)
         next_pool = set_op(tfe_pool, hosts)
         if tfe_pool != next_pool:
