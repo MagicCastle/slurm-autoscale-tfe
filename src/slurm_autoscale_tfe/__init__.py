@@ -95,7 +95,7 @@ def list_nodes_with_states(states):
     return states_nodes
 
 
-def create_maint_resv(hostlist, duration="5:00"):
+def create_maint_resv(hostlist, comment, duration="5:00"):
     """Create a maintenance reservation starting now and lasting {duration}
     on the provided list of nodes.
     """
@@ -110,6 +110,7 @@ def create_maint_resv(hostlist, duration="5:00"):
                 f"Nodes={hostlist}",
                 f"Duration={duration}",
                 "User=root",
+                f"Comment={comment}",
             ],
             stdout=PIPE,
             stderr=PIPE,
@@ -123,7 +124,7 @@ def create_maint_resv(hostlist, duration="5:00"):
         )
 
 
-def suspend_cloud_scaling(hostlist=None, duration="5:00"):
+def suspend_cloud_scaling(hostlist, comment, duration="5:00"):
     # nodes = set()
     # if hostlist is not None:
     #     nodes.update(expand_hostlist(hostlist))
@@ -135,7 +136,7 @@ def suspend_cloud_scaling(hostlist=None, duration="5:00"):
     # set, we can put them back in IDLE state, so job can be scheduled
     # once the maintenance {duration} is over.
     change_host_state(hostlist, state="DOWN", reason="suspend cloud scaling")
-    create_maint_resv(hostlist, duration=duration)
+    create_maint_resv(hostlist, comment, duration=duration)
     change_host_state(hostlist, state="IDLE")
 
 
@@ -148,7 +149,7 @@ def resume(hostlist=sys.argv[-1]):
     except AutoscaleException as exc:
         logging.error("Failed to resume '%s': %s", hostlist, str(exc))
         change_host_state(hostlist, state="POWER_DOWN_FORCE", reason="failed to resume")
-        suspend_cloud_scaling(hostlist)
+        suspend_cloud_scaling(hostlist, comment=str(exc))
         return 1
     return 0
 
@@ -161,7 +162,7 @@ def suspend(hostlist=sys.argv[-1]):
         main(Commands.SUSPEND, frozenset.difference, hostlist)
     except AutoscaleException as exc:
         logging.error("Failed to suspend '%s': %s", hostlist, str(exc))
-        suspend_cloud_scaling(hostlist)
+        suspend_cloud_scaling(hostlist, comment=str(exc))
         return 1
     return 0
 
@@ -174,7 +175,7 @@ def resume_fail(hostlist=sys.argv[-1]):
         main(Commands.RESUME_FAIL, frozenset.difference, hostlist)
     except AutoscaleException as exc:
         logging.error("Failed to resume_fail '%s': %s", hostlist, str(exc))
-        suspend_cloud_scaling(hostlist)
+        suspend_cloud_scaling(hostlist, comment=str(exc))
         return 1
     return 0
 
