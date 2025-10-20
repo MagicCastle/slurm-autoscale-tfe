@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Main module providing Slurm autoscaling functions with Terraform Cloud"""
 import logging
-import re
 import sys
 import json
 
 from enum import Enum
 from os import environ
-from subprocess import run, PIPE
+from subprocess import run, PIPE, CalledProcessError
 from datetime import datetime, timezone
 
 from filelock import FileLock
@@ -46,47 +45,42 @@ class Commands(Enum):
     RESUME_FAIL = "resume_fail"
     SUSPEND = "suspend"
 
-
-def change_host_state(hostlist, state, reason=None):
-    """Change the state of the hostlist in Slurm with scontrol.
-    Called when an exception occured and we have to revert course with
-    the state set by Slurm after calling resumeprogram or suspendprogram.
+def scontrol(arg_list):
+    """Run Slurm scontrol command and return stdout as a string
+    if the command could complete successfully.
     """
-    reason = [f"reason={reason}"] if reason is not None else []
     try:
         scontrol_run = run(
-            ["scontrol", "update", f"NodeName={hostlist}", f"state={state}"] + reason,
+            ["scontrol"] + arg_list,
             stdout=PIPE,
             stderr=PIPE,
-            check=False,
+            check=True,
         )
     except FileNotFoundError as exc:
         raise AutoscaleException("Cannot find command scontrol") from exc
-    if scontrol_run.stderr:
+    except CalledProcessError as exc:
         raise AutoscaleException(
-            f"Error while calling scontrol update: {scontrol_run.stderr.decode()}"
+            f"Error while calling scontrol: {exc}"
         )
+    return scontrol_run.stdout.decode()
 
+def change_host_state(hostlist, state, reason=None):
+    """Change the state of the hostlist in Slurm with scontrol.
+    Called when an exception occurred and we have to revert course with
+    the state set by Slurm after calling resumeprogram or suspendprogram.
+    """
+    reason = [f"reason={reason}"] if reason is not None else []
+    arg_list = ["update", f"NodeName={hostlist}", f"state={state}"] + reason
+    return scontrol(arg_list)
 
 def list_nodes_with_states(states):
     """Return a list of hostnames that present all {states} in their
     state list when listing their attributes with:
       scontrol show node --json <node_name>
     """
-    try:
-        scontrol_run = run(
-            ["scontrol", "show", "node", "--json"],
-            stdout=PIPE,
-            stderr=PIPE,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise AutoscaleException("Cannot find command scontrol") from exc
-    if scontrol_run.stderr:
-        raise AutoscaleException(
-            f"Error while calling scontrol show: {scontrol_run.stderr.decode()}"
-        )
-    all_nodes = json.loads(scontrol_run.stdout.decode())
+    arg_list = ["show", "node", "--json"]
+    output = scontrol(arg_list)
+    all_nodes = json.loads(output)
     states_nodes = set(
         node["hostname"]
         for node in all_nodes["nodes"]
@@ -99,29 +93,17 @@ def create_maint_resv(hostlist, comment, duration="5:00"):
     """Create a maintenance reservation starting now and lasting {duration}
     on the provided list of nodes.
     """
-    try:
-        scontrol_run = run(
-            [
-                "scontrol",
-                "create",
-                "reservation",
-                "StartTime=now",
-                "Flags=MAINT",
-                f"Nodes={hostlist}",
-                f"Duration={duration}",
-                "User=root",
-                f"Comment={comment}",
-            ],
-            stdout=PIPE,
-            stderr=PIPE,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise AutoscaleException("Cannot find command scontrol") from exc
-    if scontrol_run.stderr:
-        raise AutoscaleException(
-            f"Error while calling scontrol update: {scontrol_run.stderr.decode()}"
-        )
+    arg_list = [
+        "create",
+        "reservation",
+        "StartTime=now",
+        "Flags=MAINT",
+        f"Nodes={hostlist}",
+        f"Duration={duration}",
+        "User=root",
+        f"Comment={comment}",
+    ]
+    return scontrol(arg_list)
 
 
 def suspend_cloud_scaling(hostlist, comment, duration="5:00"):
@@ -184,7 +166,7 @@ def resume_fail(hostlist=sys.argv[-1]):
     except AutoscaleException as exc:
         msg = f"Failed to resume_fail '{hostlist}': {exc}"
         logging.error(msg)
-        suspend_cloud_scaling(hostlist, comment=str(msg))
+        suspend_cloud_scaling(hostlist, comment=msg)
         return 1
     return 0
 
@@ -221,7 +203,7 @@ def get_pool_from_tfe(tfe_client):
         )
 
     # When the pool variable was incorrectly initialized in the workspace,
-    # we avoid a catastrophe by setting the initial pool as an empty set.
+    # we avoid a catastrophe by ignoring the value and returning an empty set.
     if isinstance(tfe_var["value"], list):
         return tfe_var["id"], frozenset(tfe_var["value"])
     return tfe_var["id"], frozenset()
@@ -284,7 +266,7 @@ def main(command, set_op, hostlist):
     """
     hosts = frozenset(expand_hostlist(hostlist))
     tfe_client = create_tfe_client()
-    with FileLock("/tmp/slurm_autoscale_tfe_pool.lock"):
+    with FileLock("/var/spool/slurm/autoscale_tfe_pool.lock"):
         check_workspace_lock(tfe_client, max_run_time=300)
         var_id, tfe_pool = get_pool_from_tfe(tfe_client)
         next_pool = set_op(tfe_pool, hosts)
