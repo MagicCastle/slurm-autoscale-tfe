@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Main module providing Slurm autoscaling functions with Terraform Cloud"""
+import json
 import logging
 import sys
-import json
 
 from enum import Enum
-from os import environ
+from os import environ, path
 from subprocess import run, PIPE, CalledProcessError
 from datetime import datetime, timezone
 
@@ -61,7 +61,7 @@ def scontrol(arg_list):
     except CalledProcessError as exc:
         raise AutoscaleException(
             f"Error while calling scontrol: {exc}"
-        )
+        ) from exc
     return scontrol_run.stdout.decode()
 
 def change_host_state(hostlist, state, reason=None):
@@ -202,10 +202,11 @@ def get_pool_from_tfe(tfe_client):
             f'"{POOL_VAR}" variable not found in TFE workspace "{environ["TFE_WORKSPACE"]}"'
         )
 
-    # When the pool variable was incorrectly initialized in the workspace,
-    # we avoid a catastrophe by ignoring the value and returning an empty set.
     if isinstance(tfe_var["value"], list):
         return tfe_var["id"], frozenset(tfe_var["value"])
+
+    # When the pool variable was incorrectly initialized in the workspace,
+    # we avoid a catastrophe by ignoring the value and returning an empty set.
     return tfe_var["id"], frozenset()
 
 
@@ -252,11 +253,26 @@ def check_workspace_lock(tfe_client, max_run_time=300):
             f"TFE {workspace_lock.id} locked the workspace, cannot scale."
         )
 
-    if (datetime.now(tz=timezone.utc) - workspace_lock.last_update).seconds > max_run_time:
+    if (datetime.now(tz=timezone.utc) - workspace_lock.last_update).total_seconds() > max_run_time:
         raise AutoscaleException(
             f"TFE workspace has been locked for more than "
             f"{max_run_time}s by {workspace_lock.id}, giving up scaling."
         )
+
+
+def get_slurmctld_state_location():
+    """Return the value of StateSaveLocation from Slurm config
+    using scontrol show config.
+    """
+    config_output = scontrol(["show", "config"])
+    for line in config_output.split("\n"):
+        try:
+            lhs, rhs = line.split("=")
+        except ValueError:
+            continue
+        if lhs.strip() == "StateSaveLocation":
+            return rhs.strip()
+    return "/var/spool"
 
 
 def main(command, set_op, hostlist):
@@ -266,7 +282,8 @@ def main(command, set_op, hostlist):
     """
     hosts = frozenset(expand_hostlist(hostlist))
     tfe_client = create_tfe_client()
-    with FileLock("/var/spool/slurm/autoscale_tfe_pool.lock"):
+    lock_path = path.join(get_slurmctld_state_location(), "autoscale_tfe_pool.lock")
+    with FileLock(lock_path):
         check_workspace_lock(tfe_client, max_run_time=300)
         var_id, tfe_pool = get_pool_from_tfe(tfe_client)
         next_pool = set_op(tfe_pool, hosts)
