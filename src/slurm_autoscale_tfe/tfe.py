@@ -127,6 +127,7 @@ class TFEClient:
                     "hcl": True,
                     "category": "terraform",
                 },
+                "type": "vars",
             }
         }
         url = "/".join((WORKSPACE_API, self.workspace, "vars", var_id))
