@@ -138,6 +138,7 @@ class TFEClient:
         """Queue a workspace run"""
         run_data = {
             "data": {
+                "type": "runs",
                 "attributes": {
                     "message": message,
                     "target-addrs": targets,
