@@ -203,11 +203,11 @@ def get_pool_from_tfe(tfe_client):
         tfe_var = tfe_client.fetch_variable(POOL_VAR)
     except RequestException as exc:
         raise AutoscaleException(
-            "Connection to Terraform cloud failed while fetching the pool variable"
+            f"Connection to Terraform cloud failed while fetching the pool variable: {exc}"
         ) from exc
     except (ValueError, KeyError) as exc:
         raise AutoscaleException(
-            "Invalid response while reading pool variable from Terraform cloud"
+            f"Invalid response while reading pool variable from Terraform cloud: {exc}"
         ) from exc
 
     if tfe_var is None:
@@ -259,7 +259,7 @@ def check_workspace_lock(tfe_client, max_run_time=300):
         ) from exc
     except (ValueError, KeyError) as exc:
         raise AutoscaleException(
-            "Invalid response while reading workspace lock status"
+            f"Invalid response while reading workspace lock status. {exc}"
         ) from exc
 
     if not workspace_lock.locked:
@@ -326,7 +326,7 @@ def main(command, set_op, hostlist):
         ) from exc
     except (ValueError, KeyError) as exc:
         raise AutoscaleException(
-            "Invalid response while reading resources from Terraform cloud"
+            f"Invalid response while reading resources from Terraform cloud: {exc}"
         ) from exc
 
     instances = get_instances_from_tfe(tfe_resources, hosts)
@@ -342,7 +342,7 @@ def main(command, set_op, hostlist):
         ) from exc
     except (ValueError, KeyError) as exc:
         raise AutoscaleException(
-            "Invalid response while submitting the run to Terraform cloud"
+            f"Invalid response while submitting the run to Terraform cloud {exc}"
         ) from exc
     logging.info("%s %s (%s)", command.value, hostlist, run_id)
 
