@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from filelock import FileLock
 from hostlist import expand_hostlist
-from requests.exceptions import Timeout, HTTPError
+from requests.exceptions import RequestException
 
 from .tfe import TFEClient
 
@@ -137,8 +137,11 @@ def resume(hostlist=sys.argv[-1]):
     except AutoscaleException as exc:
         msg = f"Failed to resume '{hostlist}': {exc}"
         logging.error(msg)
-        change_host_state(hostlist, state="POWER_DOWN_FORCE", reason="failed to resume")
-        suspend_cloud_scaling(hostlist, comment=msg)
+        try:
+            change_host_state(hostlist, state="POWER_DOWN_FORCE", reason="failed to resume")
+            suspend_cloud_scaling(hostlist, comment=msg)
+        except AutoscaleException as cleanup_exc:
+            logging.error("Cleanup failed after resume error: %s", cleanup_exc)
         return 1
     return 0
 
@@ -152,7 +155,10 @@ def suspend(hostlist=sys.argv[-1]):
     except AutoscaleException as exc:
         msg = f"Failed to suspend '{hostlist}': {exc}"
         logging.error(msg)
-        suspend_cloud_scaling(hostlist, comment=msg)
+        try:
+            suspend_cloud_scaling(hostlist, comment=msg)
+        except AutoscaleException as cleanup_exc:
+            logging.error("Cleanup failed after suspend error: %s", cleanup_exc)
         return 1
     return 0
 
@@ -166,7 +172,10 @@ def resume_fail(hostlist=sys.argv[-1]):
     except AutoscaleException as exc:
         msg = f"Failed to resume_fail '{hostlist}': {exc}"
         logging.error(msg)
-        suspend_cloud_scaling(hostlist, comment=msg)
+        try:
+            suspend_cloud_scaling(hostlist, comment=msg)
+        except AutoscaleException as cleanup_exc:
+            logging.error("Cleanup failed after resume_fail error: %s", cleanup_exc)
         return 1
     return 0
 
@@ -192,9 +201,13 @@ def get_pool_from_tfe(tfe_client):
     """Retrieve id and content of POOL variable from Terraform cloud"""
     try:
         tfe_var = tfe_client.fetch_variable(POOL_VAR)
-    except Timeout as exc:
+    except RequestException as exc:
         raise AutoscaleException(
-            f"Connection to Terraform cloud timeout ({tfe_client.timeout}s)"
+            "Connection to Terraform cloud failed while fetching the pool variable"
+        ) from exc
+    except (ValueError, KeyError) as exc:
+        raise AutoscaleException(
+            "Invalid response while reading pool variable from Terraform cloud"
         ) from exc
 
     if tfe_var is None:
@@ -240,9 +253,13 @@ def check_workspace_lock(tfe_client, max_run_time=300):
     """
     try:
         workspace_lock = tfe_client.get_workspace_lock()
-    except HTTPError as exc:
+    except RequestException as exc:
         raise AutoscaleException(
             f"Could not retrieve workspace lock status, giving up scaling. {exc}"
+        ) from exc
+    except (ValueError, KeyError) as exc:
+        raise AutoscaleException(
+            "Invalid response while reading workspace lock status"
         ) from exc
 
     if not workspace_lock.locked:
@@ -290,13 +307,9 @@ def main(command, set_op, hostlist):
         if tfe_pool != next_pool:
             try:
                 tfe_client.update_variable(var_id, list(next_pool))
-            except HTTPError as exc:
+            except RequestException as exc:
                 raise AutoscaleException(
                     f"TFE API returned an error code when trying to update the pool variable. {exc}"
-                ) from exc
-            except Timeout as exc:
-                raise AutoscaleException(
-                    f"Connection to Terraform cloud timeout ({tfe_client.timeout}s)"
                 ) from exc
         else:
             logging.warning(
@@ -307,13 +320,13 @@ def main(command, set_op, hostlist):
 
     try:
         tfe_resources = tfe_client.fetch_resources()
-    except HTTPError as exc:
+    except RequestException as exc:
         raise AutoscaleException(
             f"TFE API returned an error code when trying to fetch the resources. {exc}"
         ) from exc
-    except Timeout as exc:
+    except (ValueError, KeyError) as exc:
         raise AutoscaleException(
-            f"Connection to Terraform cloud timeout ({tfe_client.timeout}s)"
+            "Invalid response while reading resources from Terraform cloud"
         ) from exc
 
     instances = get_instances_from_tfe(tfe_resources, hosts)
@@ -323,13 +336,13 @@ def main(command, set_op, hostlist):
             f"Slurm {command.value} {hostlist}".strip(),
             targets=list(instances | provisioners),
         )
-    except HTTPError as exc:
+    except RequestException as exc:
         raise AutoscaleException(
             f"TFE API returned an error code when trying to submit the run. {exc}"
         ) from exc
-    except Timeout as exc:
+    except (ValueError, KeyError) as exc:
         raise AutoscaleException(
-            f"Connection to Terraform cloud timeout ({tfe_client.timeout}s)"
+            "Invalid response while submitting the run to Terraform cloud"
         ) from exc
     logging.info("%s %s (%s)", command.value, hostlist, run_id)
 
