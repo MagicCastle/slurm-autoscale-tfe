@@ -309,7 +309,7 @@ def main(command, set_op, hostlist):
                 tfe_client.update_variable(var_id, list(next_pool))
             except RequestException as exc:
                 raise AutoscaleException(
-                    f"TFE API returned an error code when trying to update the pool variable. {exc}"
+                    f"TFE request failed while updating the pool variable: {exc}"
                 ) from exc
         else:
             logging.warning(
@@ -322,7 +322,7 @@ def main(command, set_op, hostlist):
         tfe_resources = tfe_client.fetch_resources()
     except RequestException as exc:
         raise AutoscaleException(
-            f"TFE API returned an error code when trying to fetch the resources. {exc}"
+            f"TFE request failed while fetching resources: {exc}"
         ) from exc
     except (ValueError, KeyError) as exc:
         raise AutoscaleException(
@@ -338,7 +338,7 @@ def main(command, set_op, hostlist):
         )
     except RequestException as exc:
         raise AutoscaleException(
-            f"TFE API returned an error code when trying to submit the run. {exc}"
+            f"TFE request failed while submitting the run: {exc}"
         ) from exc
     except (ValueError, KeyError) as exc:
         raise AutoscaleException(
