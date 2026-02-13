@@ -228,8 +228,9 @@ def get_provisioners_from_tfe(tfe_resources):
     for resource in tfe_resources:
         if resource["attributes"]["provider-type"] == "terraform_data":
             address = resource["attributes"]["address"].split(".")
-            address = f"module.{address[0]}.module.{address[1]}.{'.'.join(address[2:])}"
-            provisioners.append(address)
+            if len(address) >= 3 and address[1] == "provision":
+                address = f"module.{address[0]}.module.{address[1]}.{'.'.join(address[2:])}"
+                provisioners.append(address)
     return frozenset(provisioners)
 
 
