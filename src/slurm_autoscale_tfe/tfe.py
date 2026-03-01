@@ -8,7 +8,6 @@ from urllib3.util import Retry
 
 from requests import Session
 from requests.adapters import HTTPAdapter
-from requests.exceptions import HTTPError
 
 
 WORKSPACE_API = "https://app.terraform.io/api/v2/workspaces"
@@ -46,10 +45,7 @@ class TFEClient:
         """Use the predefined request self.session to make a GET request
         """
         resp = self.session.get(url, timeout=self.timeout)
-        if not resp.ok:
-            raise HTTPError(
-                f"TFE API returned error code {resp.status_code}: {resp.reason}"
-            )
+        resp.raise_for_status()
         return resp
 
     def patch(self, url, json):
@@ -58,10 +54,7 @@ class TFEClient:
         resp = self.session.patch(
             url, json=json, timeout=self.timeout,
         )
-        if not resp.ok:
-            raise HTTPError(
-                f"TFE API returned error code {resp.status_code}: {resp.reason}"
-            )
+        resp.raise_for_status()
         return resp
 
     def post(self, url, json):
@@ -70,10 +63,7 @@ class TFEClient:
         resp = self.session.post(
             url, json=json, timeout=self.timeout,
         )
-        if not resp.ok:
-            raise HTTPError(
-                f"TFE API returned error code {resp.status_code}: {resp.reason}"
-            )
+        resp.raise_for_status()
         return resp
 
     def get_workspace_lock(self):
