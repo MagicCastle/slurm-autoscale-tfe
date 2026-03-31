@@ -1,9 +1,11 @@
 """Module providing the class to interact with Terraform Cloud API"""
 
+from os import environ
 from json import dumps, loads
 from collections import namedtuple
 from datetime import datetime, timezone
 
+from urllib.parse import urljoin
 from urllib3.util import Retry
 
 from requests import Session
@@ -11,11 +13,22 @@ from requests.adapters import HTTPAdapter
 from requests.exceptions import HTTPError
 
 
-WORKSPACE_API = "https://app.terraform.io/api/v2/workspaces"
-RUNS_API = "https://app.terraform.io/api/v2/runs"
+PROXY_URL = environ.get("TFE_PROXY_URL")
+if PROXY_URL and PROXY_URL[-1] != '/':
+    # PROXY_URL needs to ends with a '/' for urljoin to work properly
+    PROXY_URL = PROXY_URL + '/'
+
+TFE_API_URL = environ.get("TFE_API_URL", "https://app.terraform.io/api/v2/")
+if TFE_API_URL and TFE_API_URL[-1] != '/':
+    # TFE_API_URL needs to ends with a '/' for urljoin to work properly
+    TFE_API_URL = TFE_API_URL + '/'
+
+WORKSPACE_API = urljoin(TFE_API_URL, "workspaces")
+RUNS_API = urljoin(TFE_API_URL, "runs")
 API_CONTENT = "application/vnd.api+json"
 
 WorkspaceLock = namedtuple("WorkspaceLock", ["locked", "type", "id", "last_update"])
+
 
 class TFEClient:
     """TFEClient provides functions to:
@@ -32,19 +45,24 @@ class TFEClient:
         self.session.headers["Authorization"] = f"Bearer {token}"
         self.timeout = timeout
         self.session.mount(
-            'https://',
+            "https://",
             HTTPAdapter(
                 max_retries=Retry(
                     total=nretries,
                     backoff_factor=0.1,
-                    allowed_methods={'GET', 'PATCH', 'POST'},
+                    allowed_methods={"GET", "PATCH", "POST"},
                 )
-            )
+            ),
         )
 
+    def _overwrite_proxy_url(self, url):
+        if PROXY_URL is not None:
+            url = urljoin(PROXY_URL, url.removeprefix(TFE_API_URL))
+        return url
+
     def get(self, url):
-        """Use the predefined request self.session to make a GET request
-        """
+        """Use the predefined request self.session to make a GET request"""
+        url = self._overwrite_proxy_url(url)
         resp = self.session.get(url, timeout=self.timeout)
         if not resp.ok:
             raise HTTPError(
@@ -53,10 +71,12 @@ class TFEClient:
         return resp
 
     def patch(self, url, json):
-        """Use the predefined request self.session to make a PATCH request
-        """
+        """Use the predefined request self.session to make a PATCH request"""
+        url = self._overwrite_proxy_url(url)
         resp = self.session.patch(
-            url, json=json, timeout=self.timeout,
+            url,
+            json=json,
+            timeout=self.timeout,
         )
         if not resp.ok:
             raise HTTPError(
@@ -65,10 +85,12 @@ class TFEClient:
         return resp
 
     def post(self, url, json):
-        """Use the predefined request self.session to make a POST request
-        """
+        """Use the predefined request self.session to make a POST request"""
+        url = self._overwrite_proxy_url(url)
         resp = self.session.post(
-            url, json=json, timeout=self.timeout,
+            url,
+            json=json,
+            timeout=self.timeout,
         )
         if not resp.ok:
             raise HTTPError(
@@ -87,9 +109,11 @@ class TFEClient:
             lock_type = data["relationships"]["locked-by"]["data"]["type"]
             lock_id = data["relationships"]["locked-by"]["data"]["id"]
             last_update = datetime.strptime(
-                data["attributes"]["updated-at"], '%Y-%m-%dT%H:%M:%S.%fZ'
+                data["attributes"]["updated-at"], "%Y-%m-%dT%H:%M:%S.%fZ"
             ).replace(tzinfo=timezone.utc)
-            return WorkspaceLock(locked=True, type=lock_type, id=lock_id, last_update=last_update)
+            return WorkspaceLock(
+                locked=True, type=lock_type, id=lock_id, last_update=last_update
+            )
         return WorkspaceLock(locked=False, type=None, id=None, last_update=None)
 
     def fetch_variable(self, var_name):
