@@ -6,7 +6,7 @@ authors = ["Félix-Antoine Fortin <felix-antoine.fortin@calculquebec.ca>"]
 license = "MIT"
 
 [tool.poetry.dependencies]
-python = ">=3.6.2"
+python = ">=3.9.0"
 python-hostlist = "^1.21"
 filelock = "^3.4.1"
 requests = ">=2"
