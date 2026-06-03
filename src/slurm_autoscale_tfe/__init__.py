@@ -330,8 +330,14 @@ def main(command, set_op, hostlist):
             f"Invalid response while reading resources from Terraform cloud: {exc}"
         ) from exc
 
-    instances = get_instances_from_tfe(tfe_resources, hosts)
-    provisioners = get_provisioners_from_tfe(tfe_resources)
+    try:
+        instances = get_instances_from_tfe(tfe_resources, hosts)
+        provisioners = get_provisioners_from_tfe(tfe_resources)
+    except KeyError as exc:
+        raise AutoscaleException(
+            "Resource response from Terraform Cloud mismatches what's expected."
+        ) from exc
+
     try:
         run_id = tfe_client.apply(
             f"Slurm {command.value} {hostlist}".strip(),
