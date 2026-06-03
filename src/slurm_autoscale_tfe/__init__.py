@@ -15,13 +15,16 @@ from requests.exceptions import RequestException
 
 from .tfe import TFEClient
 
+POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
+LOG_LEVEL = environ.get("AUTOSCALE_TFE_LOG_LEVEL", "INFO")
+
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
-    level=logging.INFO,
+    level=LOG_LEVEL,
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-POOL_VAR = environ.get("TFE_POOL_VAR", "pool")
+
 
 INSTANCE_TYPES = frozenset(
     [
@@ -314,44 +317,45 @@ def main(command, set_op, hostlist):
                 ) from exc
         else:
             logging.warning(
-                'TFE pool variable is unchanged following the issue of "%s %s"',
+                '%s %s: TFE pool variable value is unchanged',
                 command.value,
                 hostlist,
             )
 
-    try:
-        tfe_resources = tfe_client.fetch_resources()
-    except RequestException as exc:
-        raise AutoscaleException(
-            f"TFE request failed while fetching resources: {exc}"
-        ) from exc
-    except (ValueError, KeyError) as exc:
-        raise AutoscaleException(
-            f"Invalid response while reading resources from Terraform cloud: {exc}"
-        ) from exc
+        try:
+            tfe_resources = tfe_client.fetch_resources()
+        except RequestException as exc:
+            raise AutoscaleException(
+                f"TFE request failed while fetching resources: {exc}"
+            ) from exc
+        except (ValueError, KeyError) as exc:
+            raise AutoscaleException(
+                f"Invalid response while reading resources from Terraform cloud: {exc}"
+            ) from exc
 
-    try:
-        instances = get_instances_from_tfe(tfe_resources, hosts)
-        provisioners = get_provisioners_from_tfe(tfe_resources)
-    except KeyError as exc:
-        raise AutoscaleException(
-            "Resource response from Terraform Cloud mismatches what's expected."
-        ) from exc
+        try:
+            instances = get_instances_from_tfe(tfe_resources, hosts)
+            provisioners = get_provisioners_from_tfe(tfe_resources)
+        except KeyError as exc:
+            raise AutoscaleException(
+                "Resource response from Terraform Cloud mismatches what's expected."
+            ) from exc
 
-    try:
-        run_id = tfe_client.apply(
-            f"Slurm {command.value} {hostlist}".strip(),
-            targets=list(instances | provisioners),
-        )
-    except RequestException as exc:
-        raise AutoscaleException(
-            f"TFE request failed while submitting the run: {exc}"
-        ) from exc
-    except (ValueError, KeyError) as exc:
-        raise AutoscaleException(
-            f"Invalid response while submitting the run to Terraform cloud {exc}"
-        ) from exc
-    logging.info("%s %s (%s)", command.value, hostlist, run_id)
+        try:
+            run_id = tfe_client.apply(
+                f"Slurm {command.value} {hostlist}".strip(),
+                targets=list(instances | provisioners),
+                variables=[{"key" : POOL_VAR, "value": json.dumps(list(next_pool))}]
+            )
+        except RequestException as exc:
+            raise AutoscaleException(
+                f"TFE request failed while submitting the run: {exc}"
+            ) from exc
+        except (ValueError, KeyError) as exc:
+            raise AutoscaleException(
+                f"Invalid response while submitting the run to Terraform cloud {exc}"
+            ) from exc
+        logging.info("%s %s (%s)", command.value, hostlist, run_id)
 
     if command == Commands.RESUME_FAIL:
         change_host_state(hostlist, "IDLE")
