@@ -148,7 +148,7 @@ class TFEClient:
         resp = self.patch(url, json=patch_data)
         return resp
 
-    def apply(self, message, targets):
+    def apply(self, message, targets, variables):
         """Queue a workspace run"""
         run_data = {
             "data": {
@@ -157,6 +157,7 @@ class TFEClient:
                     "message": message,
                     "target-addrs": targets,
                     "auto-apply": True,
+                    "variables": variables,
                 },
                 "relationships": {
                     "workspace": {"data": {"type": "workspaces", "id": self.workspace}},
