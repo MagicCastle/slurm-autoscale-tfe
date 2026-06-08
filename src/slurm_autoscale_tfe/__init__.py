@@ -334,7 +334,14 @@ def main(command, set_op, hostlist):
             ) from exc
 
         try:
-            instances = get_instances_from_tfe(tfe_resources, hosts)
+            # Target existing instances only when removing nodes from the pool.
+            # On resume, Terraform must evaluate the broader module graph so newly
+            # requested instances can be created even if some requested instances
+            # already exist.
+            if command in (Commands.SUSPEND, Commands.RESUME_FAIL):
+                instances = get_instances_from_tfe(tfe_resources, hosts)
+            else:
+                instances = frozenset()
             provisioners = get_provisioners_from_tfe(tfe_resources)
         except KeyError as exc:
             raise AutoscaleException(
